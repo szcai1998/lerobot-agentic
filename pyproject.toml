@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 lerobot = [
-    "lerobot>=0.6.0",
+    "lerobot>=0.4.0,<0.6.0",
     "transformers>=4.45.0",
     "accelerate>=0.34.0",
     "peft>=0.13.0",

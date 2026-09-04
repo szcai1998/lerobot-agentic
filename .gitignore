@@ -69,3 +69,4 @@ htmlcov/
 *.swp
 *~
 MUJOCO_LOG.TXT
+.env

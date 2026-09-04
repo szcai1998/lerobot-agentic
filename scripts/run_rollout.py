@@ -36,6 +36,18 @@ def main():
     recorder = EpisodeVideoRecorder(output_dir="outputs/videos")
 
     supervisor = None
+    if not os.environ.get("GEMINI_API_KEY"):
+        env_file = Path(__file__).parent.parent / ".env"
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("export "):
+                        line = line[len("export "):].strip()
+                    if line.startswith("GEMINI_API_KEY="):
+                        os.environ["GEMINI_API_KEY"] = line.split("=", 1)[1].strip().strip("\"").strip("\x27")
+                        break
+
     if os.environ.get("GEMINI_API_KEY"):
         print("[Supervisor] Connected via GEMINI_API_KEY. Using Gemini Robotics ER.")
         try:

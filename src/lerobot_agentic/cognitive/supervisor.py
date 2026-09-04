@@ -14,6 +14,20 @@ class CognitiveSupervisor:
     """
     def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-robotics-er-2-preview"):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        if not self.api_key:
+            # Check project root .env
+            env_file = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
+            if os.path.exists(env_file):
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("export "):
+                            line = line[len("export "):].strip()
+                        if line.startswith("GEMINI_API_KEY="):
+                            self.api_key = line.split("=", 1)[1].strip().strip("\"").strip("\x27")
+                            os.environ["GEMINI_API_KEY"] = self.api_key
+                            break
+
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_name = model_name
 
@@ -52,9 +66,9 @@ class CognitiveSupervisor:
             )
             return SpatialGroundingPlan.model_validate_json(response.text)
         except Exception as e:
-            # Fallback to gemini-2.0-flash
+            # Fallback to gemini-2.5-flash
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[
                     types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                     prompt
