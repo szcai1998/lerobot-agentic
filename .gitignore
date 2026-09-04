@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Weights & Checkpoints
+checkpoints/
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# Datasets & Recording Buffers
+data/
+datasets/
+*.zarr/
+*.parquet
+*.h5
+*.hdf5
+
+# Media Outputs & Visualizations
+outputs/
+videos/
+recordings/
+renders/
+*.mp4
+*.avi
+*.gif
+*.png
+*.jpg
+
+# Logs & Profiling
+logs/
+runs/
+wandb/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+MUJOCO_LOG.TXT
