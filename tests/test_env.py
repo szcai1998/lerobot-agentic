@@ -22,3 +22,13 @@ def test_policy_executor_chunking():
     dummy_proprio = np.zeros(7, dtype=np.float32)
     chunk = executor.predict_action_chunk(dummy_rgb, dummy_proprio, goal_box=[400, 400, 600, 600])
     assert chunk.shape == (50, 7)
+
+def test_lerobot_and_cuda_harness():
+    """Verifies Stage 1 prerequisites: LeRobot import, PyTorch CUDA GPU, and MuJoCo headless context."""
+    import torch
+    import lerobot
+    import mujoco
+
+    assert torch.cuda.is_available(), "CUDA acceleration must be operational for RTX 3070"
+    assert hasattr(lerobot, "__version__"), "LeRobot must expose __version__"
+    assert mujoco.MjModel is not None, "MuJoCo library must be loaded"

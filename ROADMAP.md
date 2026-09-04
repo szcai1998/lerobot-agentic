@@ -69,8 +69,8 @@ flowchart TD
 
 | Stage | Focus Area | Status | Deliverable Gate |
 | :--- | :--- | :---: | :--- |
-| **Stage 1** | Foundation, Environment Harness & Verification | 🟡 In Progress | CUDA, EGL, and LeRobot imports verified; base test suite passing. |
-| **Stage 2** | Dual-Camera Arena & Cognitive Perception | ⚪ Pending | Top + in-hand wrist camera streams; Gemini ER + offline CV fallback. |
+| **Stage 1** | Foundation, Environment Harness & Verification | 🟢 Completed | CUDA (RTX 3070), MuJoCo EGL, LeRobot 0.4.4 verified; test suite 100% passing. |
+| **Stage 2** | Dual-Camera Arena & Cognitive Perception | 🟡 Ready / Up Next | Top + in-hand wrist camera streams; Gemini ER + offline CV fallback. |
 | **Stage 3** | Synthetic Demonstration Harvester | ⚪ Pending | 50 verified expert pick-and-place demonstration episodes in LeRobot v2 format. |
 | **Stage 4** | Local ACT Policy Training on RTX 3070 | ⚪ Pending | CVAE ACT policy trained with ResNet18 backbones on 8GB VRAM; checkpoint saved. |
 | **Stage 5** | Closed-Loop Benchmarking & Telemetry HUD | ⚪ Pending | 20-episode randomized evaluation report (success %, jerk) + dual-camera MP4 HUD. |
