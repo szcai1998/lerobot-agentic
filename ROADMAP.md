@@ -224,7 +224,10 @@ Implement an algorithmic expert pick-and-place oracle policy and an automated de
 # Verification Command:
 python scripts/record_dataset.py --episodes 50 --output-dir data/lerobot_embodied_arm
 python -c "
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+except ImportError:
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 ds = LeRobotDataset('data/lerobot_embodied_arm')
 print(f'✅ Dataset Verified: {ds.num_episodes} episodes, {ds.num_frames} total frames')
 assert ds.num_episodes >= 50, 'Insufficient episodes recorded!'

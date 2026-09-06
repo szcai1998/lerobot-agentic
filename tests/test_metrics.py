@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from lerobot_agentic.cognitive.plan_state import AtomicPlanState
+from lerobot_agentic.cognitive.plan_state import AtomicPlanState, LatestFrameBuffer
 from lerobot_agentic.cognitive.schemas import SpatialGroundingPlan
 from lerobot_agentic.utils.metrics import (
     ScenarioManifestLogger,
@@ -94,3 +94,50 @@ def test_atomic_plan_state_concurrency():
     assert np.allclose(snap_t, target_pos)
     assert np.allclose(snap_d, dest_pos)
     assert snap_sub == 0
+
+
+def test_latest_frame_buffer():
+    buf = LatestFrameBuffer()
+    assert buf.get_latest()[0] is None
+
+    rgb_mock = np.zeros((480, 640, 3), dtype=np.uint8)
+    depth_mock = np.ones((480, 640), dtype=np.float32) * 0.75
+    buf.push(rgb_mock, depth_mock, step_idx=10)
+
+    rgb_out, depth_out, wrist_out, step_idx = buf.get_latest()
+    assert rgb_out is not None
+    assert depth_out is not None
+    assert wrist_out is None
+    assert step_idx == 10
+    assert np.allclose(depth_out, 0.75)
+
+
+def test_edge_triggered_replan():
+    state = AtomicPlanState()
+    # No replan initially
+    consumed_id = 0
+    needs_replan, consumed_id = state.check_and_consume_replan(consumed_id)
+    assert not needs_replan
+    assert consumed_id == 0
+
+    # Disturbance occurs -> replan triggered with id 1
+    plan = SpatialGroundingPlan(
+        sub_goal="recover",
+        target_object="red_cube",
+        target_box_2d=[400, 400, 600, 600],
+        task_progress="failure_detected",
+        requires_replanning=True,
+        replan_id=1
+    )
+    state.update(plan)
+
+    # First check: rising edge detected
+    needs_replan, consumed_id = state.check_and_consume_replan(consumed_id)
+    assert needs_replan
+    assert consumed_id == 1
+
+    # Second check (same plan state still has requires_replanning=True): already consumed!
+    needs_replan, consumed_id = state.check_and_consume_replan(consumed_id)
+    assert not needs_replan
+    assert consumed_id == 1
+

@@ -47,3 +47,38 @@ def test_classical_ik_controller():
     assert len(cmd) == 7
     assert not np.any(np.isnan(cmd))
     assert np.isclose(cmd[-1], 0.02)
+
+
+def test_actuator_limits_clipping():
+    env = MuJoCoRobotEnv()
+    ik = ClassicalIKController(env.model, env.data)
+
+    # Extreme action should be clipped per-actuator
+    extreme_action = np.array([10.0, -10.0, 5.0, -5.0, 10.0, -10.0, 1.0])
+    clipped = ik.clip_action(extreme_action)
+
+    assert np.all(clipped[:6] <= 3.14159)
+    assert np.all(clipped[:6] >= -3.14159)
+    assert -0.025 <= clipped[6] <= 0.025
+
+
+def test_pick_and_place_fsm():
+    env = MuJoCoRobotEnv()
+    ik = ClassicalIKController(env.model, env.data)
+
+    cube_pos = np.array([0.32, 0.05, 0.43])
+    receptacle_pos = np.array([0.32, -0.15, 0.43])
+
+    # Starts in PREGRASP
+    assert ik.stage == "PREGRASP"
+    cmd, stage, completed = ik.step_pick_and_place(cube_pos, receptacle_pos)
+    assert stage == "PREGRASP"
+    assert not completed
+    assert len(cmd) == 7
+
+    # Advance until stage transitions
+    for _ in range(50):
+        cmd, stage, _ = ik.step_pick_and_place(cube_pos, receptacle_pos)
+
+    # Should have transitioned from PREGRASP to APPROACH
+    assert stage in ["APPROACH", "GRASP"]

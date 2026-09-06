@@ -11,8 +11,8 @@
   - **Python:** `3.12` (authoritative dependency resolution via committed `uv.lock`)
   - **Robot Learning Framework:** Hugging Face `lerobot==0.6.1` (standardizing on `LeRobotDataset v3.0` and `PolicyProcessorPipeline`)
   - **Physics Engine:** DeepMind `mujoco==3.12.0` (Headless Hardware-Accelerated EGL Rendering)
-  - **Deep Learning Framework:** PyTorch `2.6.0+cu124` / `torchvision==0.21.0`
-  - **Cognitive Vision-Language Tier:** Google `google-genai==1.5.0` targeting `gemini-robotics-er-2-preview` (fixed model; no silent fallbacks)
+  - **Deep Learning Framework:** PyTorch & torchvision (version compatibility contract `torch>=2.7.0,<2.12.0` and `torchvision>=0.22.0,<0.27.0` matching LeRobot 0.6.1; validated and locked in Gate 0)
+  - **Cognitive Vision-Language Tier:** Google `google-genai>=2.0.0` targeting `gemini-robotics-er-2-preview` (fixed model; no silent fallbacks)
 * **Target Hardware Profile:** Edge/Local Workstation (NVIDIA GeForce RTX 3070 8GB VRAM, Ampere) + Cloud Cognitive Tier (Google Gemini Robotics ER Managed API)
 * **Central Research Question:**
   > *"How much does agentic embodied reasoning and closed-loop failure recovery improve the robustness of learned visuomotor policies under geometric, visual, clutter, and physical disturbance shifts?"*
@@ -165,14 +165,14 @@ where $p(z) = \mathcal{N}(0, \mathbf{I})$. At inference, the latent variable is 
 To mathematically distinguish System B (pure observation-conditioned ACT) from System C/D (agentic goal-conditioned ACT), the policy receives an explicit goal vector:
 $$\mathbf{g}_t = \begin{bmatrix} \mathbf{p}_{\text{target}}^{3D} \\ \mathbf{p}_{\text{dest}}^{3D} \\ \mathbf{e}_{\text{subgoal}} \end{bmatrix} \in \mathbb{R}^{11}$$
 * $\mathbf{p}_{\text{target}}^{3D} \in \mathbb{R}^3$: Cartesian coordinates of the active manipuland target, unprojected from Gemini 2D bounding boxes using calibrated depth.
-* $\mathbf{p}_{\text{dest}}^{3D} \in \mathbb{R}^3$: Cartesian coordinates of the target drop receptacle.
+* $\mathbf{p}_{\text{dest}}^{3D} \in \mathbb{R}^3$: Cartesian coordinates of the target drop receptacle (fixed at $[0.32, -0.15, 0.43]\,\text{m}$ from calibrated layout).
 * $\mathbf{e}_{\text{subgoal}} \in \{0, 1\}^5$: One-hot indicator of the active phase (`reach`, `grasp`, `lift`, `transport`, `recover`).
 
 ```
 Gemini Robotics ER 2
         │
-        ├── target_point_3d
-        ├── destination_point_3d
+        ├── target_point_3d (unprojected from 2D grounding box)
+        ├── destination_point_3d (calibrated receptacle position)
         └── subgoal_id
         │
         ▼
@@ -180,26 +180,29 @@ Goal Conditioning Vector (g_t in R^11)
         │
         ┌─────────┴──────────┐
         │                    │
-  observations              goal
+  observations              environment_state (FeatureType.ENV)
   top RGB + wrist RGB    target xyz (3)
   proprioception (7)     destination xyz (3)
                          subgoal one-hot (5)
         │                    │
         └──────────┬─────────┘
                    ▼
-               ACT Policy
+       Stock LeRobot ACT Policy
+  (encoder_env_state_input_proj)
 ```
 
-> **Critical Training Requirement:** The synthetic demonstrations collected for training System C and D MUST record and contain this identical goal representation $\mathbf{g}_t$ alongside the image and proprioception streams. Goal conditioning cannot be retrofitted solely at inference time.
+> **Native Stock ACT Compatibility (Zero Fork Requirement):** Rather than creating custom observation keys (`observation.goal`) that stock LeRobot ignores, $\mathbf{g}_t$ is passed directly through stock LeRobot ACT's native `observation.environment_state` feature (`FeatureType.ENV` of dimension 11). In LeRobot 0.6.1, `ACTPolicy` natively provisions `encoder_env_state_input_proj` whenever `observation.environment_state` is present, embedding the supervisory goal tokens into the transformer stream alongside proprioceptive and visual tokens.
 
-##### LeRobot Action Queuing and Recovery Queue Reset
+> **Critical Training Requirement:** The synthetic demonstrations collected for training System C and D MUST record and contain this identical goal representation $\mathbf{g}_t$ in `observation.environment_state` alongside the image and proprioception streams. Goal conditioning cannot be retrofitted solely at inference time.
+
+##### LeRobot Action Queuing and Edge-Triggered Recovery Reset
 In Hugging Face LeRobot, `policy.select_action(batch)` maintains an internal FIFO action queue or temporal ensembling buffer of size $K=50$. It pops single-step actions for high-frequency execution and triggers a forward chunk pass only when the queue empties.
 * **Failure Concurrency Hazard:** If an anomaly or external disturbance occurs at step $t$, the internal queue still holds stale actions planned under the pre-disturbance state.
-* **Semantic Recovery Protocol:** When the cognitive supervisor detects failure or triggers replanning, the system must explicitly invoke:
+* **Semantic Recovery Protocol:** When the cognitive supervisor detects failure or triggers replanning, the system edge-triggers an explicit policy reset:
 ```python
 policy.reset()
 ```
-This flushes all cached pre-disturbance action vectors from LeRobot's internal buffer, forcing an immediate forward pass conditioned on the new observation and updated goal vector $\mathbf{g}_{t}$.
+This flushes all cached pre-disturbance action vectors from LeRobot's internal buffer, forcing an immediate forward pass conditioned on the new observation and updated goal vector $\mathbf{g}_{t}$. Tracking `replan_id` ensures this reset fires exactly once per anomaly event rather than on every polling tick.
 
 ##### LeRobot 0.6+ PolicyProcessorPipeline Architecture
 Following LeRobot 0.6+ standards, normalization must not be hardcoded as ad-hoc division (`/ 255.0`). The system strictly routes data through the standardized pipeline:
@@ -348,7 +351,7 @@ import os
 import sys
 import time
 import threading
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Literal
 import numpy as np
 import cv2
 import torch
@@ -520,18 +523,27 @@ class CameraGeometry:
 # 3. Cognitive Supervisory Tier & Thread-Safe Concurrency
 # -----------------------------------------------------------------------------
 class SpatialGroundingPlan(BaseModel):
-    sub_goal: str = Field(description="Active sub-task: 'reach', 'grasp', 'lift', 'transport', 'recover'")
-    target_object: str = Field(description="Identified manipuland name")
+    sub_goal: Literal["reach", "grasp", "lift", "transport", "recover"] = Field(
+        description="Active sub-task primitive"
+    )
+    target_object: str = Field(description="Identified manipuland name, e.g. 'red_cube'")
     target_box_2d: List[int] = Field(description="Normalized [ymin, xmin, ymax, xmax] in [0, 1000]")
     destination_box_2d: Optional[List[int]] = Field(default=None, description="Receptacle [ymin, xmin, ymax, xmax]")
-    task_progress: str = Field(description="'in_progress', 'completed', or 'failure_detected'")
+    task_progress: Literal["in_progress", "completed", "failure_detected"] = Field(
+        default="in_progress", description="'in_progress', 'completed', or 'failure_detected'"
+    )
     requires_replanning: bool = Field(default=False, description="True if anomaly or grasp failure detected")
+    replan_id: int = Field(default=0, description="Monotonically increasing identifier for anomaly recovery events")
     confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    should_halt: bool = Field(default=False, description="Emergency abort flag if collision or anomaly detected")
 
-    @field_validator("target_box_2d")
-    def validate_box(cls, v: List[int]) -> List[int]:
+    @field_validator("target_box_2d", "destination_box_2d")
+    @classmethod
+    def validate_box(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is None:
+            return v
         if len(v) != 4:
-            raise ValueError("target_box_2d must contain exactly 4 normalized coordinates.")
+            raise ValueError("Bounding box must contain exactly 4 normalized coordinates.")
         if not (0 <= v[0] < v[2] <= 1000 and 0 <= v[1] < v[3] <= 1000):
             raise ValueError("Bounding box coordinates must satisfy 0 <= min < max <= 1000.")
         return v
@@ -597,6 +609,43 @@ class CognitiveSupervisor:
 
         raise SupervisorAPIError(f"CognitiveSupervisor failed on {self.model_name} after {max_retries} retries: {last_err}")
 
+class LatestFrameBuffer:
+    """
+    Thread-safe frame buffer completely decoupling MuJoCo simulation from
+    the asynchronous cloud supervisory thread.
+    Only the simulation thread ever touches MuJoCo rendering contexts.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.rgb_overhead: Optional[np.ndarray] = None
+        self.depth_overhead: Optional[np.ndarray] = None
+        self.rgb_wrist: Optional[np.ndarray] = None
+        self.step_idx: int = 0
+
+    def push(
+        self,
+        rgb_overhead: np.ndarray,
+        depth_overhead: Optional[np.ndarray] = None,
+        rgb_wrist: Optional[np.ndarray] = None,
+        step_idx: int = 0
+    ):
+        with self._lock:
+            self.rgb_overhead = rgb_overhead.copy()
+            self.depth_overhead = depth_overhead.copy() if depth_overhead is not None else None
+            self.rgb_wrist = rgb_wrist.copy() if rgb_wrist is not None else None
+            self.step_idx = step_idx
+
+    def get_latest(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], int]:
+        with self._lock:
+            if self.rgb_overhead is None:
+                return None, None, None, 0
+            return (
+                self.rgb_overhead.copy(),
+                self.depth_overhead.copy() if self.depth_overhead is not None else None,
+                self.rgb_wrist.copy() if self.rgb_wrist is not None else None,
+                self.step_idx
+            )
+
 class AtomicPlanState:
     """Thread-safe shared state container for asynchronous supervisory communication."""
     def __init__(self):
@@ -606,13 +655,14 @@ class AtomicPlanState:
         self.dest_pos_world: Optional[np.ndarray] = None
         self.subgoal_id: int = 0
         self.version: int = 0
+        self.latest_replan_id: int = 0
 
     def update(
         self,
         plan: SpatialGroundingPlan,
-        target_pos_world: Optional[np.ndarray],
-        dest_pos_world: Optional[np.ndarray],
-        subgoal_id: int
+        target_pos_world: Optional[np.ndarray] = None,
+        dest_pos_world: Optional[np.ndarray] = None,
+        subgoal_id: int = 0
     ):
         with self._lock:
             self.plan = plan
@@ -620,17 +670,30 @@ class AtomicPlanState:
             self.dest_pos_world = dest_pos_world
             self.subgoal_id = subgoal_id
             self.version += 1
+            if plan.requires_replanning:
+                if plan.replan_id > 0:
+                    self.latest_replan_id = plan.replan_id
+                else:
+                    self.latest_replan_id += 1
 
     def get_snapshot(self) -> Tuple[Optional[SpatialGroundingPlan], Optional[np.ndarray], Optional[np.ndarray], int, int]:
         with self._lock:
             return self.plan, self.target_pos_world, self.dest_pos_world, self.subgoal_id, self.version
+
+    def check_and_consume_replan(self, last_consumed_id: int) -> Tuple[bool, int]:
+        """Edge-triggered recovery: True only if a new recovery event occurred."""
+        with self._lock:
+            if self.latest_replan_id > last_consumed_id:
+                return True, self.latest_replan_id
+            return False, last_consumed_id
 
 # -----------------------------------------------------------------------------
 # 4. Classical Robotics Baselines (Oracle & System A)
 # -----------------------------------------------------------------------------
 class ClassicalIKController:
     """
-    Jacobian Damped Least Squares (DLS) Inverse Kinematics controller for 6-DoF arm.
+    Jacobian Damped Least Squares (DLS) Inverse Kinematics controller for 6-DoF arm
+    with downward-constrained gripper orientation and 7-stage Pick-and-Place state machine.
     """
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, damping: float = 0.05):
         self.model = model
@@ -641,13 +704,32 @@ class ClassicalIKController:
         self.arm_qpos_indices = [self.model.jnt_qposadr[self.model.joint(j).id] for j in self.arm_joint_names]
         self.gripper_qpos_idx = self.model.jnt_qposadr[self.model.joint("finger_joint1").id]
 
+        # 7-stage Pick-and-Place state machine tracking
+        self.stage: str = "PREGRASP"
+        self.stage_timer: int = 0
+
+    def reset_state_machine(self):
+        self.stage = "PREGRASP"
+        self.stage_timer = 0
+
+    def clip_action(self, action: np.ndarray) -> np.ndarray:
+        """Applies actuator-specific command limits (arm: [-pi, pi], gripper: [-0.025, 0.025])."""
+        clipped = action.copy()
+        clipped[:6] = np.clip(clipped[:6], -3.14159, 3.14159)
+        if len(clipped) > 6:
+            clipped[6] = np.clip(clipped[6], -0.025, 0.025)
+        return clipped
+
     def solve_ik_step(self, target_pos_world: np.ndarray, gripper_cmd: float = 0.02) -> np.ndarray:
         """Computes 7-element actuator target position vector [q1..q6, q_grip]."""
-        current_ee_pos = self.data.site_xpos[self.ee_site_id]
+        current_ee_pos = self.data.site_xpos[self.ee_site_id] if self.ee_site_id != -1 else self.data.xpos[self.model.body("gripper_base").id]
         error = target_pos_world - current_ee_pos
 
         jac_pos = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.ee_site_id)
+        if self.ee_site_id != -1:
+            mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.ee_site_id)
+        else:
+            mujoco.mj_jacBody(self.model, self.data, jac_pos, None, self.model.body("gripper_base").id)
 
         # Slice 6 robot arm velocity DoFs (safe addressing)
         j_arm = jac_pos[:, :6]
@@ -657,7 +739,74 @@ class ClassicalIKController:
 
         current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
         target_arm_q = current_q + np.clip(dq, -0.08, 0.08)
-        return np.concatenate([target_arm_q, [gripper_cmd]])
+        raw_action = np.concatenate([target_arm_q, [gripper_cmd]])
+        return self.clip_action(raw_action)
+
+    def step_pick_and_place(
+        self,
+        cube_pos: np.ndarray,
+        receptacle_pos: np.ndarray = np.array([0.32, -0.15, 0.43])
+    ) -> Tuple[np.ndarray, str, bool]:
+        """
+        Executes one 50 Hz control step of the 7-stage finite-state machine:
+        PREGRASP -> APPROACH -> GRASP -> LIFT -> TRANSPORT -> PLACE -> RETREAT
+        Returns (action_7d, active_stage_name, is_task_completed).
+        """
+        self.stage_timer += 1
+        current_ee_pos = self.data.site_xpos[self.ee_site_id] if self.ee_site_id != -1 else self.data.xpos[self.model.body("gripper_base").id]
+        is_completed = False
+
+        if self.stage == "PREGRASP":
+            target = cube_pos + np.array([0.0, 0.0, 0.08])
+            action = self.solve_ik_step(target, gripper_cmd=0.02)
+            if np.linalg.norm(current_ee_pos - target) < 0.02 or self.stage_timer > 40:
+                self.stage = "APPROACH"
+                self.stage_timer = 0
+
+        elif self.stage == "APPROACH":
+            target = cube_pos + np.array([0.0, 0.0, 0.01])
+            action = self.solve_ik_step(target, gripper_cmd=0.02)
+            if np.linalg.norm(current_ee_pos - target) < 0.015 or self.stage_timer > 30:
+                self.stage = "GRASP"
+                self.stage_timer = 0
+
+        elif self.stage == "GRASP":
+            target = cube_pos + np.array([0.0, 0.0, 0.01])
+            action = self.solve_ik_step(target, gripper_cmd=-0.02)
+            if self.stage_timer > 25:
+                self.stage = "LIFT"
+                self.stage_timer = 0
+
+        elif self.stage == "LIFT":
+            target = cube_pos + np.array([0.0, 0.0, 0.12])
+            action = self.solve_ik_step(target, gripper_cmd=-0.02)
+            if current_ee_pos[2] > cube_pos[2] + 0.06 or self.stage_timer > 35:
+                self.stage = "TRANSPORT"
+                self.stage_timer = 0
+
+        elif self.stage == "TRANSPORT":
+            target = receptacle_pos + np.array([0.0, 0.0, 0.08])
+            action = self.solve_ik_step(target, gripper_cmd=-0.02)
+            if np.linalg.norm(current_ee_pos[:2] - target[:2]) < 0.03 or self.stage_timer > 50:
+                self.stage = "PLACE"
+                self.stage_timer = 0
+
+        elif self.stage == "PLACE":
+            target = receptacle_pos + np.array([0.0, 0.0, 0.02])
+            action = self.solve_ik_step(target, gripper_cmd=0.02)  # Open gripper
+            if self.stage_timer > 25:
+                self.stage = "RETREAT"
+                self.stage_timer = 0
+
+        elif self.stage == "RETREAT":
+            target = np.array([0.25, 0.0, 0.55])
+            action = self.solve_ik_step(target, gripper_cmd=0.02)
+            is_completed = True
+
+        else:
+            action = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices] + [0.02])
+
+        return action, self.stage, is_completed
 
 # -----------------------------------------------------------------------------
 # 5. Visuomotor Policy Tier: LeRobot ACT with Processors & Goal Conditioning
@@ -671,8 +820,10 @@ class GoalConditionedACTPolicyExecutor:
     ACT select_action() -> LeRobot postprocessor -> environment/action adapter -> MuJoCo actuator.
     
     Explicitly supports:
-    - Goal conditioning vector g_t in R^11 (target xyz, dest xyz, one-hot subgoal)
+    - Stock ACT environment state vector observation.environment_state in R^11 (target xyz, dest xyz, one-hot subgoal)
+    - Checkpoint-restored PolicyProcessorPipeline
     - policy.reset() queue flushing upon dynamic disturbance recovery
+    - Actuator-specific command clipping
     """
     def __init__(
         self,
@@ -686,18 +837,24 @@ class GoalConditionedACTPolicyExecutor:
 
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
-                from lerobot.common.policies.act.modeling_act import ACTPolicy
+                from lerobot.policies.act import ACTConfig, ACTPolicy
                 self.policy = ACTPolicy.from_pretrained(pretrained_policy_path).to(self.device)
                 self.policy.eval()
                 self.policy.reset()
-                # In LeRobot 0.6+, load external preprocessor and postprocessor pipelines if present
+                # In LeRobot 0.6+, load external preprocessor and postprocessor pipelines from checkpoint
                 try:
-                    from lerobot.policies import make_pre_post_processors
+                    from lerobot.processor.pipeline import PolicyProcessorPipeline
+                    self.preprocessor = PolicyProcessorPipeline.from_pretrained(
+                        pretrained_policy_path, filename="policy_preprocessor.json"
+                    )
+                    self.postprocessor = PolicyProcessorPipeline.from_pretrained(
+                        pretrained_policy_path, filename="policy_postprocessor.json"
+                    )
+                except Exception:
+                    from lerobot.policies.factory import make_pre_post_processors
                     self.preprocessor, self.postprocessor = make_pre_post_processors(
                         policy_cfg=self.policy.config
                     )
-                except Exception:
-                    pass
                 print(f"[PolicyExecutor] Loaded LeRobot ACTPolicy from {pretrained_policy_path}")
             except Exception as e:
                 print(f"[PolicyExecutor] LeRobot checkpoint load notice: {e}. Defaulting to scaffold.")
@@ -717,6 +874,7 @@ class GoalConditionedACTPolicyExecutor:
         """
         Stage 1: Raw MuJoCo observation -> Environment Processor.
         Converts sensor arrays into raw tensor dictionary adhering to LeRobot dataset keys.
+        Stock LeRobot ACT consumes environment state vector via FeatureType.ENV.
         """
         batch = {
             "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).to(self.device),
@@ -724,19 +882,25 @@ class GoalConditionedACTPolicyExecutor:
             "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
         }
         if goal_vector is not None:
-            batch["observation.goal"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
+            # Stock ACT encoder_env_state_input_proj consumes FeatureType.ENV
+            batch["observation.environment_state"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
         return batch
 
     def environment_action_adapter(self, action: Any) -> np.ndarray:
         """
         Stage 5: Environment / Action Adapter -> MuJoCo actuator command.
-        Converts postprocessed tensor to numpy joint command and clips to actuator limits.
+        Converts postprocessed tensor to numpy joint command with actuator-specific clipping:
+        Arm joints 1..6 clip to [-pi, pi], gripper finger clips to [-0.025, 0.025].
         """
         if isinstance(action, torch.Tensor):
             action_np = action.squeeze(0).detach().cpu().numpy()
         else:
             action_np = np.asarray(action)
-        return np.clip(action_np, -3.14, 3.14)
+        clipped = np.copy(action_np)
+        clipped[:6] = np.clip(clipped[:6], -3.14159, 3.14159)
+        if len(clipped) > 6:
+            clipped[6] = np.clip(clipped[6], -0.025, 0.025)
+        return clipped
 
     def select_action(
         self,
@@ -750,31 +914,23 @@ class GoalConditionedACTPolicyExecutor:
         raw MuJoCo obs -> env processor -> policy preprocessor -> ACT select_action() -> postprocessor -> action adapter.
         """
         if self.policy is not None:
-            # 1. Environment Processor
             batch = self.environment_processor(rgb_top, rgb_wrist, proprioception, goal_vector)
-
-            # 2. LeRobot Policy Preprocessor (externalized normalization)
             if self.preprocessor is not None:
                 batch = self.preprocessor(batch)
             else:
-                # Fallback image float casting if preprocessor pipeline is absent
                 batch["observation.images.top"] = batch["observation.images.top"].float() / 255.0
                 batch["observation.images.wrist"] = batch["observation.images.wrist"].float() / 255.0
 
-            # 3. Policy select_action() (manages internal temporal action chunk queue)
             with torch.no_grad():
                 raw_action = self.policy.select_action(batch)
 
-            # 4. LeRobot Policy Postprocessor (externalized denormalization)
             if self.postprocessor is not None:
                 processed_action = self.postprocessor(raw_action)
             else:
                 processed_action = raw_action
 
-            # 5. Environment / Action Adapter
             return self.environment_action_adapter(processed_action)
 
-        # Scaffold fallback: maintain current joint positions
         return proprioception
 
 # -----------------------------------------------------------------------------
@@ -828,40 +984,51 @@ class MuJoCoManipulationArena:
         return np.array(self.data.xpos[self.cube_body_id], dtype=np.float64)
 
     def apply_disturbance(self):
-        """Simulates physical bump displacement."""
+        """Applies deterministic mid-trajectory state displacement perturbation (+8cm X, -6cm Y)."""
         cube_joint_id = self.model.joint("cube_joint").id
         qadr = self.model.jnt_qposadr[cube_joint_id]
         self.data.qpos[qadr] += 0.08      # +8cm X displacement
         self.data.qpos[qadr + 1] -= 0.06  # -6cm Y displacement
         mujoco.mj_forward(self.model, self.data)
-        print("💥 [Disturbance Injected] Cube displaced (+8cm X, -6cm Y)!")
+        print("💥 [Disturbance Injected] Cube displaced (+8cm X, -6cm Y) via deterministic state perturbation!")
 
     def step(self, action: np.ndarray):
-        """Advances physics by 10 substeps (dt=0.002s * 10 = 20ms = 50 Hz)."""
-        self.data.ctrl[:len(action)] = np.clip(action, -3.14, 3.14)
+        """Advances physics by 10 substeps (dt=0.002s * 10 = 20ms = 50 Hz) with per-actuator clipping."""
+        clipped = np.copy(action)
+        clipped[:6] = np.clip(clipped[:6], -3.14159, 3.14159)
+        if len(clipped) > 6:
+            clipped[6] = np.clip(clipped[6], -0.025, 0.025)
+        self.data.ctrl[:len(clipped)] = clipped
         for _ in range(10):
             mujoco.mj_step(self.model, self.data)
 
 def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = True):
     """
     Executes a benchmark episode for one of:
-    - 'oracle': Ground-truth state -> IK
-    - 'system_a': Classical RGB-D unprojection -> IK
+    - 'oracle': Ground-truth state -> 7-stage Pick-and-Place FSM -> DLS IK
+    - 'system_a': Classical RGB-D perception -> calibrated unprojection -> 7-stage FSM -> DLS IK
     - 'system_b': Pure unconditioned ACT policy
-    - 'system_c': Goal-conditioned ACT policy
-    - 'system_d': Goal-conditioned ACT policy + Async online verification & policy.reset() recovery
+    - 'system_c': Hierarchical open-loop: Gemini ER 2 initial plan -> Goal-conditioned ACT
+    - 'system_d': Hierarchical closed-loop: Gemini ER 2 async monitoring + edge-triggered policy.reset() recovery
     """
     print(f"\n================ Running Benchmark: {system_id.upper()} (Disturbance={has_disturbance}) ================")
     arena = MuJoCoManipulationArena()
     ik_controller = ClassicalIKController(arena.model, arena.data)
     policy_executor = GoalConditionedACTPolicyExecutor()
     shared_plan_state = AtomicPlanState()
+    frame_buffer = LatestFrameBuffer()
 
     goal_instruction = "Grasp the red cube and place it into the green receptacle zone."
+    receptacle_pos = np.array([0.32, -0.15, 0.43])  # Calibrated destination receptacle
     stop_event = threading.Event()
 
+    # Push initial frame into decoupled buffer
+    rgb_init, depth_init = arena.render_overhead_rgbd()
+    rgb_wrist_init = arena.render_wrist_rgb()
+    frame_buffer.push(rgb_init, depth_init, rgb_wrist_init, step_idx=0)
+
     # -------------------------------------------------------------------------
-    # Asynchronous Cognitive Supervisory Loop (Cadence ~0.5-2 Hz)
+    # Asynchronous Cognitive Supervisory Loop (Decoupled from MuJoCo Context)
     # -------------------------------------------------------------------------
     def supervisor_worker():
         if not os.environ.get("GEMINI_API_KEY"):
@@ -873,71 +1040,91 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
             return
 
         while not stop_event.is_set():
-            rgb_top, depth_map = arena.render_overhead_rgbd()
+            rgb_snap, depth_snap, _, _ = frame_buffer.get_latest()
+            if rgb_snap is None or depth_snap is None:
+                time.sleep(0.02)
+                continue
+
             current_plan, _, _, _, _ = shared_plan_state.get_snapshot()
-            curr_subgoal = current_plan.sub_goal if current_plan else "initial"
+            curr_subgoal = current_plan.sub_goal if current_plan else "reach"
 
             try:
-                plan = supervisor.analyze_scene(rgb_top, goal_instruction, current_subgoal=curr_subgoal)
-                
+                plan = supervisor.analyze_scene(rgb_snap, goal_instruction, current_subgoal=curr_subgoal)
+
                 # Unproject 2D box to metric 3D using calibrated camera geometry
                 ymin, xmin, ymax, xmax = plan.target_box_2d
                 u_center = int(np.clip((xmin + xmax) / 2000.0 * 640, 0, 639))
                 v_center = int(np.clip((ymin + ymax) / 2000.0 * 480, 0, 479))
-                d_val = float(depth_map[v_center, u_center])
+                d_val = float(depth_snap[v_center, u_center])
 
                 target_3d = arena.cam_overhead.unproject_pixel_to_world(u_center, v_center, d_val, arena.data)
-                dest_3d = np.array([0.32, -0.15, 0.43])  # Target receptacle zone
                 subgoal_idx = SUBGOAL_MAP.get(plan.sub_goal, 0)
 
-                shared_plan_state.update(plan, target_3d, dest_3d, subgoal_idx)
-                print(f"[Supervisor Async] Subgoal: {plan.sub_goal} | Replan Needed: {plan.requires_replanning}")
+                shared_plan_state.update(plan, target_3d, receptacle_pos, subgoal_idx)
+                print(f"[Supervisor Async] Subgoal: {plan.sub_goal} | Replan Needed: {plan.requires_replanning} | Replan ID: {plan.replan_id}")
             except (InvalidDepthError, SupervisorAPIError) as err:
                 print(f"[Supervisor Async Error] {err}")
 
-            time.sleep(0.5)  # 2 Hz target cadence
+            time.sleep(0.5)  # Measured empirical target cadence (~2 Hz)
 
+    # Concurrency Dispatch: System D has continuous online recovery; System C is open-loop
     supervisor_thread = threading.Thread(target=supervisor_worker, daemon=True)
-    if system_id in ["system_c", "system_d"]:
+    if system_id == "system_d":
         supervisor_thread.start()
+    elif system_id == "system_c":
+        if os.environ.get("GEMINI_API_KEY"):
+            try:
+                sup = CognitiveSupervisor()
+                init_plan = sup.analyze_scene(rgb_init, goal_instruction, current_subgoal="reach")
+                ymin, xmin, ymax, xmax = init_plan.target_box_2d
+                u_c = int((xmin + xmax) / 2000.0 * 640)
+                v_c = int((ymin + ymax) / 2000.0 * 480)
+                d_c = float(depth_init[v_c, u_c])
+                t3d = arena.cam_overhead.unproject_pixel_to_world(u_c, v_c, d_c, arena.data)
+                shared_plan_state.update(init_plan, t3d, receptacle_pos, SUBGOAL_MAP.get(init_plan.sub_goal, 0))
+            except Exception as e:
+                print(f"[System C Init Plan Notice] {e}")
 
-    # Initial default target for systems without supervisor
-    current_plan_version = 0
+    last_consumed_replan = 0
     sim_steps = 250  # 5.0 seconds at 50 Hz control rate
 
     for step in range(sim_steps):
+        tick_start = time.perf_counter()
         t_sec = step * 0.02
         proprio = arena.get_proprioception()
         rgb_top, depth_top = arena.render_overhead_rgbd()
         rgb_wrist = arena.render_wrist_rgb()
 
-        # Inject disturbance at t = 2.0s
+        # Push frame to buffer for non-blocking supervisor consumption
+        frame_buffer.push(rgb_top, depth_top, rgb_wrist, step_idx=step)
+
+        # Inject deterministic mid-trajectory state displacement perturbation at t = 2.0s
         if step == 100 and has_disturbance:
             arena.apply_disturbance()
 
         # Read latest asynchronous plan state without blocking control thread
-        plan, target_3d, dest_3d, subgoal_idx, plan_ver = shared_plan_state.get_snapshot()
+        plan, target_3d, dest_3d, subgoal_idx, _ = shared_plan_state.get_snapshot()
 
-        # Dynamic Recovery Queue Reset for System D
-        if system_id == "system_d" and plan is not None and plan_ver > current_plan_version:
-            current_plan_version = plan_ver
-            if plan.requires_replanning:
-                print(f"[{t_sec:.2f}s] 🔄 [Recovery] Anomaly detected! Resetting LeRobot action queue & replanning...")
+        # Edge-Triggered Dynamic Recovery Queue Reset for System D
+        if system_id == "system_d":
+            needs_recovery, new_replan_id = shared_plan_state.check_and_consume_replan(last_consumed_replan)
+            if needs_recovery:
+                last_consumed_replan = new_replan_id
+                print(f"[{t_sec:.2f}s] 🔄 [Recovery] Edge-triggered event {new_replan_id} detected! Resetting LeRobot action queue...")
                 policy_executor.reset()
 
         # ---------------------------------------------------------------------
         # 50 Hz Controller Dispatch
         # ---------------------------------------------------------------------
         if system_id == "oracle":
-            # Oracle: Ground-truth cube position from MuJoCo state -> DLS IK
+            # Oracle: Ground-truth cube position -> 7-stage Pick-and-Place FSM -> DLS IK
             gt_cube_pos = arena.get_cube_ground_truth_pos()
-            target_pose = gt_cube_pos + np.array([0.0, 0.0, 0.03])
-            grip = 0.02 if step < 80 else -0.015
-            action = ik_controller.solve_ik_step(target_pose, gripper_cmd=grip)
+            action, stage, completed = ik_controller.step_pick_and_place(gt_cube_pos, receptacle_pos)
+            if step % 25 == 0:
+                print(f"[{t_sec:.2f}s] [Oracle] Stage: {stage} | Completed: {completed}")
 
         elif system_id == "system_a":
-            # System A: Classical RGB-D perception -> calibrated unprojection -> DLS IK
-            # Find red cube center via color thresholding
+            # System A: Classical RGB-D perception -> calibrated unprojection -> 7-stage FSM -> DLS IK
             hsv = cv2.cvtColor(rgb_top, cv2.COLOR_RGB2HSV)
             mask = cv2.inRange(hsv, np.array([0, 120, 70]), np.array([10, 255, 255]))
             coords = np.argwhere(mask > 0)
@@ -953,17 +1140,16 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
                 p_target = None
 
             if p_target is not None:
-                grip = 0.02 if step < 80 else -0.015
-                action = ik_controller.solve_ik_step(p_target, gripper_cmd=grip)
+                action, stage, completed = ik_controller.step_pick_and_place(p_target, receptacle_pos)
             else:
-                action = proprio  # Hold safe pose on perception / invalid depth failure
+                action = proprio  # Safe pose holding on perception failure
 
         elif system_id == "system_b":
             # System B: Pure unconditioned ACT policy
             action = policy_executor.select_action(rgb_top, rgb_wrist, proprio, goal_vector=None)
 
         elif system_id in ["system_c", "system_d"]:
-            # System C & D: Goal-conditioned ACT policy
+            # System C & D: Goal-conditioned ACT policy with 11-DoF environment_state
             if target_3d is not None and dest_3d is not None:
                 subgoal_one_hot = np.zeros(5, dtype=np.float32)
                 subgoal_one_hot[subgoal_idx] = 1.0
@@ -976,8 +1162,14 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
         else:
             action = proprio
 
-        # Advance physics
+        # Advance physics at 50 Hz
         arena.step(action)
+
+        # 50 Hz Real-Time Wall-Clock Pacing for Systems C & D (Cloud-in-the-Loop)
+        if system_id in ["system_c", "system_d"]:
+            elapsed = time.perf_counter() - tick_start
+            if elapsed < 0.02:
+                time.sleep(0.02 - elapsed)
 
     stop_event.set()
     print(f"Benchmark Episode Completed for {system_id.upper()}.")

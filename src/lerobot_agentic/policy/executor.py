@@ -32,20 +32,32 @@ class VisuomotorPolicyExecutor:
 
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
-                from lerobot.common.policies.act.modeling_act import ACTPolicy
+                try:
+                    from lerobot.policies.act import ACTConfig, ACTPolicy  # noqa: F401
+                except ImportError:
+                    from lerobot.policies.act.modeling_act import ACTPolicy
+
                 self.policy = ACTPolicy.from_pretrained(pretrained_policy_path).to(self.device)
                 self.policy.eval()
                 self.policy.reset()
 
-                # LeRobot 0.6+ PolicyProcessorPipeline initialization
+                # LeRobot 0.6+ PolicyProcessorPipeline initialization from checkpoint
                 try:
-                    from lerobot.policies import make_pre_post_processors
-                    self.preprocessor, self.postprocessor = make_pre_post_processors(
-                        policy_cfg=self.policy.config
+                    from lerobot.processor.pipeline import PolicyProcessorPipeline
+                    self.preprocessor = PolicyProcessorPipeline.from_pretrained(
+                        pretrained_policy_path, filename="policy_preprocessor.json"
                     )
-                except Exception:  # noqa: BLE001, S110
-                    # Preprocessor pipeline optional depending on checkpoint metadata
-                    pass
+                    self.postprocessor = PolicyProcessorPipeline.from_pretrained(
+                        pretrained_policy_path, filename="policy_postprocessor.json"
+                    )
+                except Exception:  # noqa: BLE001
+                    try:
+                        from lerobot.policies.factory import make_pre_post_processors
+                        self.preprocessor, self.postprocessor = make_pre_post_processors(
+                            policy_cfg=self.policy.config
+                        )
+                    except Exception:  # noqa: BLE001, S110
+                        pass
 
                 print(f"[PolicyExecutor] Loaded Hugging Face LeRobot ACTPolicy from {pretrained_policy_path}")
             except Exception as e:  # noqa: BLE001
@@ -66,6 +78,7 @@ class VisuomotorPolicyExecutor:
         """
         Stage 1: Raw MuJoCo observation -> Environment Processor.
         Converts sensor arrays into raw tensor dictionary adhering to LeRobot dataset keys.
+        Uses stock LeRobot ACT's native observation.environment_state feature.
         """
         batch = {
             "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).to(self.device),
@@ -74,19 +87,25 @@ class VisuomotorPolicyExecutor:
         if rgb_wrist is not None:
             batch["observation.images.wrist"] = torch.from_numpy(rgb_wrist).permute(2, 0, 1).unsqueeze(0).to(self.device)
         if goal_vector is not None:
-            batch["observation.goal"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
+            # Stock LeRobot ACT consumes environment state via FeatureType.ENV
+            batch["observation.environment_state"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
         return batch
 
     def environment_action_adapter(self, action: Any) -> np.ndarray:
         """
         Stage 5: Environment / Action Adapter -> MuJoCo actuator command.
-        Converts postprocessed tensor to numpy joint command and clips to actuator limits.
+        Converts postprocessed tensor to numpy joint command with actuator-specific clipping:
+        Arm joints 1..6 clip to [-pi, pi], gripper finger clips to [-0.025, 0.025].
         """
         if isinstance(action, torch.Tensor):
             action_np = action.squeeze(0).detach().cpu().numpy()
         else:
             action_np = np.asarray(action)
-        return np.clip(action_np, -3.14, 3.14)
+        clipped = action_np.copy()
+        clipped[:6] = np.clip(clipped[:6], -3.14159, 3.14159)
+        if len(clipped) > 6:
+            clipped[6] = np.clip(clipped[6], -0.025, 0.025)
+        return clipped
 
     def select_action(
         self,

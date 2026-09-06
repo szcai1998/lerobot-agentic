@@ -9,7 +9,7 @@ from pathlib import Path
 # Add src to pythonpath
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from lerobot_agentic.cognitive.plan_state import AtomicPlanState
+from lerobot_agentic.cognitive.plan_state import AtomicPlanState, LatestFrameBuffer
 from lerobot_agentic.cognitive.supervisor import CognitiveSupervisor
 from lerobot_agentic.policy.executor import VisuomotorPolicyExecutor
 from lerobot_agentic.sim.env import MuJoCoRobotEnv
@@ -51,9 +51,9 @@ def main():
                         os.environ["GEMINI_API_KEY"] = line.split("=", 1)[1].strip().strip("\"").strip("\x27")
                         break
 
+    frame_buffer = LatestFrameBuffer()
+    frame_buffer.push(obs["rgb"], rgb_wrist=obs.get("rgb_wrist"), step_idx=0)
     stop_event = threading.Event()
-    latest_frame = [obs["rgb"]]
-    frame_lock = threading.Lock()
 
     # -------------------------------------------------------------------------
     # Asynchronous Cognitive Supervisor Thread (~0.5 - 2 Hz)
@@ -68,15 +68,14 @@ def main():
             return
 
         while not stop_event.is_set():
-            with frame_lock:
-                frame_to_analyze = latest_frame[0].copy()
-
-            try:
-                plan = supervisor.plan_and_ground(frame_to_analyze, args.goal)
-                plan_state.update(plan)
-                print(f"[Supervisor Async] Grounding -> Sub-Goal: '{plan.sub_goal}' | Box: {plan.target_box_2d} | Replan: {plan.requires_replanning}")
-            except Exception as e:  # noqa: BLE001
-                print(f"[Supervisor Async Error] {e}")
+            rgb_snap, _, _, _ = frame_buffer.get_latest()
+            if rgb_snap is not None:
+                try:
+                    plan = supervisor.plan_and_ground(rgb_snap, args.goal)
+                    plan_state.update(plan)
+                    print(f"[Supervisor Async] Grounding -> Sub-Goal: '{plan.sub_goal}' | Box: {plan.target_box_2d} | Replan: {plan.requires_replanning}")
+                except Exception as e:  # noqa: BLE001
+                    print(f"[Supervisor Async Error] {e}")
 
             time.sleep(0.5)  # Target ~2 Hz cadence, measured empirically
 
@@ -90,34 +89,34 @@ def main():
     sim_step = 0
     current_chunk = None
     chunk_idx = 0
-    last_plan_version = 0
+    consumed_replan_id = 0
 
     start_time = time.time()
 
     try:
         while sim_step < args.steps:
+            tick_start = time.perf_counter()
             rgb_frame = obs["rgb"]
             rgb_wrist = obs.get("rgb_wrist")
             proprio = obs["proprioception"]
 
-            # Update shared frame for async supervisor
-            with frame_lock:
-                latest_frame[0] = rgb_frame
+            # Push immutable copy to thread-safe frame buffer
+            frame_buffer.push(rgb_frame, rgb_wrist=rgb_wrist, step_idx=sim_step)
 
             # Read latest plan without blocking 50 Hz execution loop
-            active_plan, _target_3d, _dest_3d, _subgoal_idx, plan_ver = plan_state.get_snapshot()
+            active_plan, _target_3d, _dest_3d, _subgoal_idx, _plan_ver = plan_state.get_snapshot()
 
-            # Dynamic closed-loop recovery: reset policy queue if replanning requested
-            if active_plan is not None and plan_ver > last_plan_version:
-                last_plan_version = plan_ver
-                if active_plan.requires_replanning:
-                    print(f"[{sim_step * 0.02:4.2f}s] 🔄 [Recovery] Anomaly detected! Resetting LeRobot action queue & replanning...")
-                    policy.reset()
-                    current_chunk = None
+            # Edge-triggered dynamic closed-loop recovery: reset policy queue only once per anomaly event
+            has_new_replan, new_replan_id = plan_state.check_and_consume_replan(consumed_replan_id)
+            if has_new_replan:
+                consumed_replan_id = new_replan_id
+                print(f"[{sim_step * 0.02:4.2f}s] 🔄 [Recovery] Anomaly event {new_replan_id} detected! Resetting LeRobot action queue...")
+                policy.reset()
+                current_chunk = None
 
-                if active_plan.should_halt:
-                    print("[Safety] Anomaly detected by supervisor. Halting.")
-                    break
+            if active_plan is not None and active_plan.should_halt:
+                print("[Safety] Anomaly detected by supervisor. Halting.")
+                break
 
             # Retrieve action chunk (50 steps per chunk = 1s horizon)
             if current_chunk is None or chunk_idx >= len(current_chunk):
@@ -145,6 +144,11 @@ def main():
                 recorder.add_frame(rgb_frame, sub_goal=current_sub_goal, target_box_2d=box_to_draw, step_idx=sim_step)
 
             sim_step += 1
+
+            # Optional real-time pacing (50 Hz = 20ms) if pacing enabled
+            tick_elapsed = time.perf_counter() - tick_start
+            if tick_elapsed < 0.02 and args.policy_path is not None:
+                time.sleep(0.02 - tick_elapsed)
 
     finally:
         stop_event.set()
