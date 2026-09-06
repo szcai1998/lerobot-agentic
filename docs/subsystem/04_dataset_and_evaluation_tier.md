@@ -79,9 +79,9 @@ where $\mathbf{J}$ is the manipulator Jacobian and $\lambda \approx 10^{-3}$ is 
 
 ---
 
-## 3. Hugging Face `LeRobotDataset` v2.0 Specification
+## 3. Hugging Face `LeRobotDataset` Specification (v2.0 / v3.0)
 
-Data storage strictly conforms to the Hugging Face `LeRobotDataset` v2.0 schema, ensuring seamless compatibility with Hugging Face Hub streaming, `accelerate`, and LeRobot training tools.
+Data storage strictly conforms to the Hugging Face `LeRobotDataset` schema (supporting v2.0 and v3.0 chunked formats), ensuring seamless compatibility with Hugging Face Hub streaming, `accelerate`, and LeRobot training tools.
 
 ### 3.1 Directory Layout
 ```text
@@ -107,6 +107,7 @@ data/lerobot_embodied_arm/
 | `observation.images.top` | Video (H.264) | `(480, 640, 3)` | Overhead table workspace camera |
 | `observation.images.wrist` | Video (H.264) | `(480, 640, 3)` | Forearm wrist-mounted camera |
 | `observation.state` | Vector (Float32) | `(7,)` | Joint angles $q_{1\dots6}$ (rad) + gripper width $q_7$ (m) |
+| `observation.environment_state` | Vector (Float32) | `(11,)` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`) |
 | `action` | Vector (Float32) | `(7,)` | Target actuator position setpoints for step $t+1$ |
 | `task_index` | Scalar (Int64) | `()` | Task identifier (e.g., $0$ for pick-and-place) |
 | `timestamp` | Scalar (Float32) | `()` | Timestamp relative to episode onset ($t \times 0.02\,\text{s}$) |

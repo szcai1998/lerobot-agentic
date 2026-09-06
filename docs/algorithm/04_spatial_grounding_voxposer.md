@@ -14,7 +14,7 @@
 
 A central bottleneck in end-to-end visuomotor policies is **spatial generalization and reasoning**:
 * High-frequency visuomotor policies (ACT, Diffusion) excel at reactive tactile feedback, but lack semantic scene understanding and fail when distractor objects appear or camera viewpoints change.
-* Vision-Language Foundation Models (e.g., Gemini 2.0, GPT-4o) exhibit state-of-the-art semantic reasoning and zero-shot spatial grounding, but lack native $50\,\text{Hz}$ low-level motor torque loops.
+* Vision-Language Foundation Models (e.g., Gemini Robotics ER 2, GPT-4o) exhibit state-of-the-art semantic reasoning and zero-shot spatial grounding, but lack native $50\,\text{Hz}$ low-level motor torque loops.
 
 This document formalizes the mathematical and algorithmic bridge between **high-level spatial grounding** and **low-level continuous execution**:
 1. **OpenVLA & Parameter-Efficient LoRA Adaptation**: Translating internet-scale multimodal representations into robotic actions via discrete tokenization and low-rank matrix decomposition.

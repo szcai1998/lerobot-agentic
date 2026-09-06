@@ -11,7 +11,7 @@ A frequent question when building agentic robotics systems is: **If Gemini is an
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                    TIER 1: FROZEN MULTIMODAL REASONER (Cloud)                    │
-│                     Google Gemini Robotics ER / Gemini 2.0 Flash                 │
+│                 Google Gemini Robotics ER (gemini-robotics-er-2-preview)          │
 │                                                                                  │
 │  • Nature: Zero-shot, non-trainable foundational VLM (API inference).            │
 │  • Input: Static RGB image frame + natural language prompt.                      │
@@ -58,6 +58,7 @@ At each timestep $t$, the state observation $o_t$ and action $a_t$ consist of:
 | `observation.images.top` | `(480, 640, 3)` | `uint8` | Overhead perspective camera covering table workspace |
 | `observation.images.wrist` | `(480, 640, 3)` | `uint8` | Gripper eye-in-hand camera providing fine-grained alignment |
 | `observation.state` | `(7,)` | `float32` | Current 6 joint angles $[q_1, \dots, q_6] \in [-\pi, \pi]$ + gripper width $q_7$ |
+| `observation.environment_state` | `(11,)` | `float32` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`) |
 | `action` | `(7,)` | `float32` | Target joint positions for step $t+1$ sent to MuJoCo actuators |
 | `task_index` | `()` | `int64` | Discrete task identifier |
 
@@ -167,8 +168,8 @@ Where $m = 0.01\text{--}0.05$ is the decay weighting. This produces **smooth, ji
 | **Optimizer** | AdamW | $\text{lr} = 1\times 10^{-4}$, weight decay $= 1\times 10^{-4}$ |
 | **LR Schedule** | Cosine Annealing | 500-step linear warmup, min lr $= 1\times 10^{-6}$ |
 | **Precision** | PyTorch AMP (BF16/FP16) | Fast Tensor Core execution |
-| **Peak VRAM** | **$\approx 2.4\text{ GB}$** | **$5.6\text{ GB}$ headroom on RTX 3070** |
-| **Training Time** | **$\approx 45\text{ minutes}$** | 50,000 steps on local RTX 3070 |
+| **Peak VRAM** | **Planning Envelope: ~3.5–5.5 GB** | **Sufficient headroom on RTX 3070 (8GB); validate in Gate 0** |
+| **Training Time** | **Planning Envelope: ~45–60 min** | 50,000 steps on local RTX 3070; validate in Gate 0 |
 
 ---
 

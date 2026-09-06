@@ -115,10 +115,11 @@ During inference, the encoder is bypassed entirely: $z$ is either sampled from $
 The perception pipeline processes two complementary viewpoints to resolve depth ambiguity and self-occlusion:
 
 ```
-Overhead Camera (480x640x3)  ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
-Wrist Camera (480x640x3)     ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
-Proprioception qpos (7-DoF)  ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
-CVAE Latent Vector z (32)    ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
+Overhead Camera (480x640x3)     ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
+Wrist Camera (480x640x3)        ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
+Proprioception qpos (7-DoF)     ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
+Goal Vector (11-DoF env_state)  ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
+CVAE Latent Vector z (32)       ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
 ```
 
 1. **Overhead Camera (`observation.images.top`)**:
@@ -130,6 +131,9 @@ CVAE Latent Vector z (32)    ──► [Linear Projection]  ──────�
 3. **Proprioceptive State (`observation.state`)**:
    - $7$-dimensional vector: 6 arm joint angles $[q_1, \dots, q_6]$ (radians) + 1 gripper slide displacement $q_7$ (meters).
    - Normalized using dataset statistics $(\boldsymbol{\mu}_s, \boldsymbol{\sigma}_s)$ stored in `meta/stats.json`.
+4. **Goal Conditioning Vector (`observation.environment_state`)**:
+   - 11-dimensional vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`).
+   - Ingested via stock LeRobot ACT's native `encoder_env_state_input_proj`, conditioning the CVAE transformer on cognitive subgoals and 3D metric affordances without custom library forks.
 
 ---
 

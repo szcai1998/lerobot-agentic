@@ -62,10 +62,13 @@ flowchart TD
 
 ### 3.1 Cognitive $\to$ Policy Contract (`SpatialGroundingPlan`)
 Defined in [`src/lerobot_agentic/cognitive/schemas.py`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic/cognitive/schemas.py):
-- `sub_goal: str`: Active state directive (`reach_cube`, `grasp_cube`, `lift_cube`, `transport_to_zone`).
+- `sub_goal: Literal[...]`: Active state directive (`reach`, `grasp`, `lift`, `transport`, `recover`, etc.).
 - `target_object: str`: Semantic object name (`red_cube`).
 - `target_box_2d: List[int]`: 4-element normalized bounding box $[y_{\min}, x_{\min}, y_{\max}, x_{\max}]$ in $[0, 1000]$.
 - `destination_box_2d: Optional[List[int]]`: Destination receptacle bounding box in $[0, 1000]$.
+- `task_progress: Literal[...]`: Task lifecycle state (`in_progress`, `completed`, `failure_detected`).
+- `requires_replanning: bool`: Anomaly flag indicating displacement or grasp failure.
+- `replan_id: int`: Monotonically increasing counter for edge-triggered recovery.
 - `confidence_score: float`: Affordance confidence in $[0.0, 1.0]$.
 - `should_halt: bool`: Emergency abort flag.
 - `reasoning: Optional[str]`: Chain-of-thought rationale.

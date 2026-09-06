@@ -1,7 +1,7 @@
 # Embodied AI Algorithmic Foundations: Mathematical Compendium & Architecture Guide
 
 > **Core Repository Module:** [`lerobot_agentic`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic)  
-> **Target Frameworks:** Hugging Face `lerobot v0.6+`, DeepMind `mujoco 3.x`, PyTorch 2.4+ CUDA 12.4, Google `google-genai`  
+> **Target Frameworks:** Hugging Face `lerobot v0.6+`, DeepMind `mujoco 3.12+`, PyTorch 2.7+ (CUDA 12.4+), Google `google-genai>=2.0.0`  
 > **Compute Profile:** NVIDIA GeForce RTX 4090 (24GB VRAM) & RTX 3070 (8GB VRAM)
 
 ---
@@ -68,7 +68,7 @@ Does it need edge hardware training (<8GB VRAM)?                                
                                           YES            NO
                                            |              v
                                            v       [ Integrate Cognitive Supervisor ]
-                                     [ VoxPoser ]   (Gemini 2.0 2D-to-3D Unprojection
+                                     [ VoxPoser ]   (Gemini Robotics ER 2 2D-to-3D Unprojection
                                      (3D Value       + LeRobot 50Hz Motor Policy)
                                       Voxel Maps)
 ```
@@ -130,7 +130,7 @@ lerobot-agentic/
     ├── policy/
     │   └── executor.py                     <-- VisuomotorPolicyExecutor (ACT / Diffusion / Quintic Splines)
     ├── cognitive/
-    │   ├── supervisor.py                   <-- CognitiveSupervisor (Gemini 2.0 Spatial Grounding API)
+    │   ├── supervisor.py                   <-- CognitiveSupervisor (Gemini Robotics ER 2 Spatial Grounding API)
     │   └── schemas.py                      <-- SpatialGroundingPlan (Pydantic Schemas & Bounding Boxes)
     └── sim/
         └── env.py                          <-- Headless MuJoCo EGL Physics Simulation Loop

@@ -167,11 +167,11 @@ To ensure stable physical grasping without penetration artifacts:
 The simulation mounts two hardware-aligned optical camera sensors directly in the MJCF tree:
 
 ```xml
-<!-- Overhead Perspective Camera -->
+<!-- Overhead Perspective Camera (Mounted in worldbody) -->
 <camera name="overhead_cam" pos="0.65 0 0.9" euler="0 0.75 1.5708"/>
 
-<!-- Wrist-Mounted Eye-in-Hand Camera -->
-<camera name="wrist_cam" pos="0.3 0 0.65" euler="0 0.35 1.5708"/>
+<!-- Wrist-Mounted Eye-in-Hand Camera (Attached to wrist_link body) -->
+<camera name="wrist_cam" pos="0 0.035 0.02" euler="0 0.5 1.5708"/>
 ```
 
 ### 6.1 Camera Specifications
