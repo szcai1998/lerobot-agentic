@@ -56,9 +56,11 @@ This file records the current project status, active hardware profile, verified 
 
 ## 5. Current Task & Next Actionable Steps
 
-1. **Finish Stage 1 Harness Verification:**
-   - Complete `uv pip install -e ".[lerobot,dev]"` and verify `import lerobot`.
-   - Update `AGENTS.md`, `README.md`, `ARCHITECTURE.md`, `ROADMAP.md`.
-2. **Proceed to Stage 2 (Dual-Camera Sim & Dynamic Arena):**
-   - Add eye-in-hand `wrist_cam` directly to gripper palm.
+1. **Strategic Reframing & Dossier 01 Upgrade:**
+   - Completed full upgrade of `docs/dossier_01_lerobot_agentic.md` based on tier-1 robotics industry audit.
+   - Reframed core question around hierarchical reasoning robustness, classical IK baselines, and closed-loop failure recovery.
+   - Pruned unrealistic compute targets; centered on local RTX 3070 8GB + LeRobot ACT.
+2. **Next Steps (Stage 2 in ROADMAP.md):**
+   - Dual-camera simulation arena setup (`overhead_cam` + `wrist_cam`).
+   - Grounding integration and offline CV fallback.
    - Add tabletop object randomization and receptacle target zone.
