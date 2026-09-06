@@ -14,7 +14,7 @@
 ## 🧭 Master Documentation Directory
 
 - 🏛️ **System Architecture**: [`ARCHITECTURE.md`](./ARCHITECTURE.md) — Master evergreen design document, dual-rate control loops, and topological dataflow.
-- 🗺️ **Project Roadmap**: [`ROADMAP.md`](./ROADMAP.md) — 5-stage bite-sized agile execution plan with explicit inputs, outputs, constraints, and success gates.
+- 🗺️ **Project Roadmap**: [`ROADMAP.md`](./ROADMAP.md) — Gate 0 + 4-phase agile implementation roadmap with explicit inputs, outputs, constraints, and success criteria.
 - 🧠 **Operational Memory**: [`MEMORY.md`](./MEMORY.md) — Current system state, verified invariants, hardware budgets, and active tasks.
 - 🛡️ **Operational Guidelines**: [`AGENTS.md`](./AGENTS.md) — Karpathy rules, verification ladder, kinematics safety, and AI coding constraints.
 - 📦 **Subsystem Deep Dives**: [`docs/subsystem/`](./docs/subsystem/) — In-depth architectural guides for Cognitive, Policy, Simulation, and Dataset tiers.
@@ -121,7 +121,7 @@ The resulting video with HUD telemetry overlays is saved to `outputs/videos/roll
 lerobot-agentic/
 ├── AGENTS.md                          # Operational constitution (Karpathy rules, physics safety)
 ├── ARCHITECTURE.md                    # Master high-level evergreen architecture map
-├── ROADMAP.md                         # 5-stage bite-sized agile execution roadmap
+├── ROADMAP.md                         # Gate 0 + 4-phase agile implementation roadmap
 ├── MEMORY.md                          # Current project status, hardware profile & verified invariants
 ├── README.md                          # Project overview & documentation index
 ├── pyproject.toml                     # PEP 517/621 build specification & dependency extras

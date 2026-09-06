@@ -8,7 +8,7 @@
 
 Before performing any action or proposing changes, consult these living repositories of truth:
 - **System Architecture**: [`ARCHITECTURE.md`](./ARCHITECTURE.md) — Evergreen high-level map, dual-rate topology, and module interfaces.
-- **Project Roadmap**: [`ROADMAP.md`](./ROADMAP.md) — Discrete 5-stage agile implementation roadmap with strict success criteria and scope boundaries.
+- **Project Roadmap**: [`ROADMAP.md`](./ROADMAP.md) — Gate 0 + 4-phase agile implementation roadmap with strict success criteria and scope boundaries.
 - **Operational Memory**: [`MEMORY.md`](./MEMORY.md) — Real-time project status, active compute profile (RTX 3070 8GB), and verified technical invariants.
 - **Subsystem Deep Dives**: [`docs/subsystem/`](./docs/subsystem/) — Architectural specifications for Cognitive (01), Policy (02), Simulation (03), and Dataset/Eval (04) tiers.
 - **Algorithm Formulations**: [`docs/algorithm/`](./docs/algorithm/) — Academic literature and mathematical compendium (ACT, Diffusion, SmolVLA, VoxPoser).

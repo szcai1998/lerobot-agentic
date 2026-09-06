@@ -64,7 +64,7 @@ This file records the current project status, active hardware profile, verified 
 ## 4. Architectural Documents & Living Artifacts
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md): Master high-level evergreen architecture map.
-- [`ROADMAP.md`](./ROADMAP.md): Bite-sized 5-stage task roadmap with inputs, outputs, constraints, and success criteria.
+- [`ROADMAP.md`](./ROADMAP.md): Gate 0 + 4-phase agile implementation roadmap with inputs, outputs, constraints, and success criteria.
 - [`AGENTS.md`](./AGENTS.md): Operational constitution (Karpathy Rules, verification ladder, physics safety, one-line pointers).
 - [`docs/dossier_01_lerobot_agentic.md`](./docs/dossier_01_lerobot_agentic.md): Fully audited student-ready dossier with Section 6 Architectural Reference Scaffold.
 - [`docs/subsystem/`](./docs/subsystem/): Comprehensive subsystem design documents.
