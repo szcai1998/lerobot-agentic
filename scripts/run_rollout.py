@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
+
 # Add src to pythonpath
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -20,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run LeRobot-Agentic dual-rate closed-loop simulation rollout.")
     parser.add_argument("--goal", type=str, default="Grasp the red cube and lift it into the workspace",
                         help="Natural language task prompt for Cognitive Supervisor")
-    parser.add_argument("--steps", type=int, default=150, help="Total 50Hz simulation steps (150 = 3.0s)")
+    parser.add_argument("--steps", type=int, default=750, help="Benchmark timeout in 50Hz steps (750 = 15.0s)")
     parser.add_argument("--video", action="store_true", default=True, help="Record MP4 video of rollout")
     parser.add_argument("--gif", action="store_true", help="Record animated GIF of rollout")
     parser.add_argument("--policy-path", type=str, default=None, help="Path to pretrained LeRobot ACTPolicy checkpoint")
@@ -29,7 +31,7 @@ def main():
     print("================================================================================")
     print("🤖 LeRobot-Agentic: Embodied Manipulation Rollout Engine (Dual-Rate Asynchronous)")
     print(f"Goal: '{args.goal}'")
-    print(f"Horizon: {args.steps} steps @ 50 Hz (~{args.steps * 0.02:.1f}s physical time)")
+    print(f"Horizon: {args.steps} steps @ 50 Hz (~{args.steps * 0.02:.1f}s physical time limit)")
     print("================================================================================")
 
     env = MuJoCoRobotEnv()
@@ -90,6 +92,7 @@ def main():
     current_chunk = None
     chunk_idx = 0
     consumed_replan_id = 0
+    termination_reason = "timeout"
 
     start_time = time.time()
 
@@ -115,9 +118,23 @@ def main():
                 current_chunk = None
 
             if active_plan is not None and active_plan.should_halt:
-                print("[Safety] Anomaly detected by supervisor. Halting.")
+                print(f"[Supervisor Request] Halt requested: {active_plan.decision_note}")
+                termination_reason = "software_halt"
                 break
 
+            # Multi-condition early termination checks
+            cube_pos = env.get_cube_position()
+            if cube_pos[2] < 0.2:  # Cube fell off table
+                print(f"[{sim_step * 0.02:4.2f}s] ❌ [Failure] Cube dropped below workspace (z={cube_pos[2]:.3f}m).")
+                termination_reason = "unrecoverable_failure"
+                break
+
+            # Placement success criteria: cube within 3cm of receptacle and arm retreating
+            dist_to_zone = np.linalg.norm(cube_pos[:2] - np.array([0.32, -0.15]))
+            if dist_to_zone < 0.03 and cube_pos[2] < 0.44 and (active_plan and active_plan.sub_goal in ("place", "retreat")):
+                print(f"[{sim_step * 0.02:4.2f}s] ✅ [Success] Task complete! Cube successfully placed in target zone.")
+                termination_reason = "task_complete"
+                break
             # Retrieve action chunk (50 steps per chunk = 1s horizon)
             if current_chunk is None or chunk_idx >= len(current_chunk):
                 goal_box = active_plan.target_box_2d if (active_plan and active_plan.target_box_2d) else [450, 480, 550, 560]
@@ -155,7 +172,7 @@ def main():
 
     elapsed = time.time() - start_time
     fps = sim_step / max(elapsed, 1e-4)
-    print(f"\n[Completed] Executed {sim_step} steps in {elapsed:.2f}s ({fps:.1f} FPS).")
+    print(f"\n[Completed] Executed {sim_step} steps in {elapsed:.2f}s ({fps:.1f} FPS) | Termination: {termination_reason}.")
     print(f"Final distance to cube: {info['distance_to_cube']:.4f} m | Cube lifted: {info['cube_lifted']}")
 
     if args.video:

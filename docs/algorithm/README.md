@@ -1,6 +1,6 @@
 # Embodied AI Algorithmic Foundations: Mathematical Compendium & Architecture Guide
 
-> **Core Repository Module:** [`lerobot_agentic`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic)  
+> **Core Repository Module:** [`lerobot_agentic`](../../src/lerobot_agentic)  
 > **Target Frameworks:** Hugging Face `lerobot v0.6+`, DeepMind `mujoco 3.12+`, PyTorch 2.7+ (CUDA 12.4+), Google `google-genai>=2.0.0`  
 > **Compute Profile:** NVIDIA GeForce RTX 4090 (24GB VRAM) & RTX 3070 (8GB VRAM)
 
@@ -12,10 +12,10 @@ This documentation suite provides mathematically rigorous formulations, network 
 
 | Chapter | Document | Foundational Literature | Core Focus & Equations |
 | :---: | :--- | :--- | :--- |
-| **01** | [`01_act_policy.md`](file:///home/aivise/Documents/antigravity/lerobot-agentic/docs/algorithm/01_act_policy.md) | Zhao et al. (RSS 2023) | Action Chunking with Transformers (ACT), CVAE ELBO derivation, Gaussian KL divergence, temporal ensembling EMA. |
-| **02** | [`02_diffusion_policy.md`](file:///home/aivise/Documents/antigravity/lerobot-agentic/docs/algorithm/02_diffusion_policy.md) | Chi et al. (RSS 2023 / IJRR 2024) | Visuomotor Diffusion Policy, DDPM forward/reverse equations, Tweedie's score matching, DDIM ODE acceleration, CNN vs DiT. |
-| **03** | [`03_vla_flow_matching.md`](file:///home/aivise/Documents/antigravity/lerobot-agentic/docs/algorithm/03_vla_flow_matching.md) | LeRobot Team (2025), Black et al. (2024/2025), Lipman et al. (ICLR 2023) | SmolVLA-450M, $\pi_0$ & $\pi_0$-FAST, Continuous Optimal Transport Flow Matching (OT-CFM) vs Diffusion, DCT frequency tokenization. |
-| **04** | [`04_spatial_grounding_voxposer.md`](file:///home/aivise/Documents/antigravity/lerobot-agentic/docs/algorithm/04_spatial_grounding_voxposer.md) | Kim et al. (CoRL 2024), Huang et al. (CoRL 2023) | OpenVLA-7B LoRA fine-tuning math, VoxPoser 3D value potential fields, Gemini 2D-to-3D metric unprojection in $\mathrm{SE}(3)$. |
+| **01** | [`01_act_policy.md`](./01_act_policy.md) | Zhao et al. (RSS 2023) | Action Chunking with Transformers (ACT), CVAE ELBO derivation, Gaussian KL divergence, temporal ensembling EMA. |
+| **02** | [`02_diffusion_policy.md`](./02_diffusion_policy.md) | Chi et al. (RSS 2023 / IJRR 2024) | Visuomotor Diffusion Policy, DDPM forward/reverse equations, Tweedie's score matching, DDIM ODE acceleration, CNN vs DiT. |
+| **03** | [`03_vla_flow_matching.md`](./03_vla_flow_matching.md) | LeRobot Team (2025), Black et al. (2024/2025), Lipman et al. (ICLR 2023) | SmolVLA-450M, $\pi_0$ & $\pi_0$-FAST, Continuous Optimal Transport Flow Matching (OT-CFM) vs Diffusion, DCT frequency tokenization. |
+| **04** | [`04_spatial_grounding_voxposer.md`](./04_spatial_grounding_voxposer.md) | Kim et al. (CoRL 2024), Huang et al. (CoRL 2023) | OpenVLA-7B LoRA fine-tuning math, VoxPoser 3D value potential fields, Gemini 2D-to-3D metric unprojection in $\mathrm{SE}(3)$. |
 
 ---
 
@@ -136,6 +136,6 @@ lerobot-agentic/
         └── env.py                          <-- Headless MuJoCo EGL Physics Simulation Loop
 ```
 
-* **ACT Inference & Minimum-Jerk Affordance**: See [`src/lerobot_agentic/policy/executor.py`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic/policy/executor.py).
-* **Gemini Spatial Grounding & Verification**: See [`src/lerobot_agentic/cognitive/supervisor.py`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic/cognitive/supervisor.py).
-* **Data Schemas & Type Safety**: See [`src/lerobot_agentic/cognitive/schemas.py`](file:///home/aivise/Documents/antigravity/lerobot-agentic/src/lerobot_agentic/cognitive/schemas.py).
+* **ACT Inference & Minimum-Jerk Affordance**: See [`src/lerobot_agentic/policy/executor.py`](../../src/lerobot_agentic/policy/executor.py).
+* **Gemini Spatial Grounding & Verification**: See [`src/lerobot_agentic/cognitive/supervisor.py`](../../src/lerobot_agentic/cognitive/supervisor.py).
+* **Data Schemas & Type Safety**: See [`src/lerobot_agentic/cognitive/schemas.py`](../../src/lerobot_agentic/cognitive/schemas.py).

@@ -32,22 +32,58 @@ class ClassicalIKController:
             clipped[6] = np.clip(clipped[6], -0.025, 0.025)
         return clipped
 
-    def solve_ik_step(self, target_pos_world: np.ndarray, gripper_cmd: float = 0.02) -> np.ndarray:
-        """Computes 7-element actuator target position vector [q1..q6, q_grip]."""
+    def solve_ik_step(
+        self,
+        target_pos_world: np.ndarray,
+        target_rot_world: np.ndarray | None = None,
+        gripper_cmd: float = 0.02,
+        orientation_weight: float = 0.15,
+    ) -> np.ndarray:
+        """
+        Computes 7-element actuator target position vector [q1..q6, q_grip].
+        Implements 6D Pose IK:
+        - When target_rot_world is provided: full stacked 6D DLS IK (e = [e_pos; w*e_rot], J = [J_pos; w*J_rot]).
+        - When target_rot_world is None: positional DLS IK with secondary nullspace posture projection
+          for downward gripper alignment without singular lockup.
+        """
         current_ee_pos = self.data.site_xpos[self.ee_site_id] if self.ee_site_id != -1 else self.data.xpos[self.model.body("gripper_base").id]
-        error = target_pos_world - current_ee_pos
+        pos_error = target_pos_world - current_ee_pos
 
         jac_pos = np.zeros((3, self.model.nv))
+        jac_rot = np.zeros((3, self.model.nv))
         if self.ee_site_id != -1:
-            mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.ee_site_id)
+            mujoco.mj_jacSite(self.model, self.data, jac_pos, jac_rot, self.ee_site_id)
         else:
-            mujoco.mj_jacBody(self.model, self.data, jac_pos, None, self.model.body("gripper_base").id)
+            mujoco.mj_jacBody(self.model, self.data, jac_pos, jac_rot, self.model.body("gripper_base").id)
 
-        # Slice 6 robot arm velocity DoFs (safe addressing)
-        j_arm = jac_pos[:, :6]
-        lambda_sq = (self.damping ** 2) * np.eye(3)
-        inv_term = np.linalg.inv(j_arm @ j_arm.T + lambda_sq)
-        dq = j_arm.T @ inv_term @ error
+        j_pos_arm = jac_pos[:, :6]
+        j_rot_arm = jac_rot[:, :6]
+
+        if target_rot_world is not None:
+            # Full 6D Pose IK with explicit SO(3) rotation target
+            current_ee_mat = self.data.site_xmat[self.ee_site_id].reshape(3, 3) if self.ee_site_id != -1 else self.data.xmat[self.model.body("gripper_base").id].reshape(3, 3)
+            rot_error = 0.5 * (
+                np.cross(current_ee_mat[:, 0], target_rot_world[:, 0]) +
+                np.cross(current_ee_mat[:, 1], target_rot_world[:, 1]) +
+                np.cross(current_ee_mat[:, 2], target_rot_world[:, 2])
+            )
+            w = orientation_weight
+            j_6d = np.vstack([j_pos_arm, w * j_rot_arm])
+            e_6d = np.concatenate([pos_error, w * rot_error])
+            lambda_sq = (self.damping ** 2) * np.eye(6)
+            dq = j_6d.T @ np.linalg.inv(j_6d @ j_6d.T + lambda_sq) @ e_6d
+        else:
+            # Positional IK with downward-alignment nullspace projection
+            lambda_sq = (self.damping ** 2) * np.eye(3)
+            j_pinv = j_pos_arm.T @ np.linalg.inv(j_pos_arm @ j_pos_arm.T + lambda_sq)
+            dq_pos = j_pinv @ pos_error
+
+            # Secondary nullspace task: align wrist joint 5 downward and pan joint 1 toward target
+            pan = np.arctan2(target_pos_world[1], target_pos_world[0])
+            q_posture = np.array([pan, 0.6, 0.6, 0.0, 0.8, 0.0])
+            current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
+            n_proj = np.eye(6) - j_pinv @ j_pos_arm
+            dq = dq_pos + n_proj @ (0.4 * (q_posture - current_q))
 
         current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
         target_arm_q = current_q + np.clip(dq, -0.08, 0.08)

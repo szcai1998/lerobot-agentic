@@ -73,7 +73,7 @@ The 2025–2026 frontier has stabilized around **Hierarchical Dual-Rate Embodied
                                               v
 +---------------------------------------------------------------------------------------------------+
 |                        3. PHYSICS SIMULATION TIER (DeepMind MuJoCo 3.12+)                         |
-|   - Articulated 6-DoF Robotic Arm + Parallel Jaw Gripper (7 Actuators)                            |
+|   - Articulated 6-DoF Robotic Arm + Parallel Gripper (Single-Actuated Sliding Finger + Opposing Fixed Finger) |
 |   - Rigid-body dynamics & contact solver running at 500 Hz (dt=0.002s, 10 substeps per step)      |
 |   - Dual Synchronized Cameras: Static Overhead (Top) + In-Hand Wrist (Attached to End-Effector)   |
 |   - Calibrated Pinhole Optics (Field of View fovy, Dynamic Intrinsics K, Extrinsics T_world_cam)  |
@@ -176,14 +176,14 @@ Gemini Robotics ER 2
         └── subgoal_id
         │
         ▼
-Goal Conditioning Vector (g_t in R^11)
+Goal Conditioning Vector (g_t in R^13)
         │
         ┌─────────┴──────────┐
         │                    │
   observations              environment_state (FeatureType.ENV)
   top RGB + wrist RGB    target xyz (3)
   proprioception (7)     destination xyz (3)
-                         subgoal one-hot (5)
+                         subgoal one-hot (7)
         │                    │
         └──────────┬─────────┘
                    ▼
@@ -191,22 +191,20 @@ Goal Conditioning Vector (g_t in R^11)
   (encoder_env_state_input_proj)
 ```
 
-> **Native Stock ACT Compatibility (Zero Fork Requirement):** Rather than creating custom observation keys (`observation.goal`) that stock LeRobot ignores, $\mathbf{g}_t$ is passed directly through stock LeRobot ACT's native `observation.environment_state` feature (`FeatureType.ENV` of dimension 11). In LeRobot 0.6.1, `ACTPolicy` natively provisions `encoder_env_state_input_proj` whenever `observation.environment_state` is present, embedding the supervisory goal tokens into the transformer stream alongside proprioceptive and visual tokens.
+> **Native Stock ACT Compatibility (Zero Fork Requirement):** Rather than creating custom observation keys (`observation.goal`) that stock LeRobot ignores, $\mathbf{g}_t$ is passed directly through stock LeRobot ACT's native `observation.environment_state` feature (`FeatureType.ENV` of dimension 13). In LeRobot 0.6.1, `ACTPolicy` natively provisions `encoder_env_state_input_proj` whenever `observation.environment_state` is present, embedding the supervisory goal tokens into the transformer stream alongside proprioceptive and visual tokens. The 7 one-hot categories represent the canonical primitives: `["reach", "grasp", "lift", "transport", "place", "retreat", "recover"]`.
 
 > **Critical Training Requirement:** The synthetic demonstrations collected for training System C and D MUST record and contain this identical goal representation $\mathbf{g}_t$ in `observation.environment_state` alongside the image and proprioception streams. Goal conditioning cannot be retrofitted solely at inference time.
 
-##### LeRobot Action Queuing and Edge-Triggered Recovery Reset
-In Hugging Face LeRobot, `policy.select_action(batch)` maintains an internal FIFO action queue or temporal ensembling buffer of size $K=50$. It pops single-step actions for high-frequency execution and triggers a forward chunk pass only when the queue empties.
-* **Failure Concurrency Hazard:** If an anomaly or external disturbance occurs at step $t$, the internal queue still holds stale actions planned under the pre-disturbance state.
-* **Semantic Recovery Protocol:** When the cognitive supervisor detects failure or triggers replanning, the system edge-triggers an explicit policy reset:
-```python
-policy.reset()
-```
-This flushes all cached pre-disturbance action vectors from LeRobot's internal buffer, forcing an immediate forward pass conditioned on the new observation and updated goal vector $\mathbf{g}_{t}$. Tracking `replan_id` ensures this reset fires exactly once per anomaly event rather than on every polling tick.
+##### LeRobot ACT Inference Mode: Queue / Receding Horizon
+LeRobot ACT supports two distinct inference topologies:
+1. **Queue / Receding Horizon (Primary Benchmark Mode):** The policy predicts a chunk of $K = 50$ steps, executes $n = 10$ steps from its internal FIFO queue at 50 Hz, and replans at $\approx 5\,\text{Hz}$ ($\Delta t = 200\,\text{ms}$). This guarantees ample computational margin on consumer GPUs (NVIDIA RTX 3070 8GB) and provides clean, unambiguous recovery semantics:
+   - When an anomaly or disturbance occurs, `policy.reset()` flushes the remaining queued actions and triggers immediate re-inference from the updated state.
+2. **Temporal Ensembling (Secondary Ablation):** Infers a new chunk every single 50 Hz control step ($20\,\text{ms}$) and blends overlapping predictions via Exponential Moving Average (EMA). This is maintained as an optional secondary ablation, but is not the primary benchmark loop to prevent GPU compute saturation.
 
 ##### LeRobot 0.6+ PolicyProcessorPipeline Architecture
-Following LeRobot 0.6+ standards, normalization must not be hardcoded as ad-hoc division (`/ 255.0`). The system strictly routes data through the standardized pipeline:
+Following LeRobot 0.6+ standards, normalization must not be hardcoded as ad-hoc division (`/ 255.0`). The system strictly routes data through the standardized pipeline restored via `make_pre_post_processors(policy_cfg=..., pretrained_path=...)`:
 $$\text{Raw MuJoCo Obs} \xrightarrow{} \text{Env Processor} \xrightarrow{} \text{Policy Preprocessor} \xrightarrow{} \text{ACT } \texttt{select\_action()} \xrightarrow{} \text{Policy Postprocessor} \xrightarrow{} \text{Actuator Cmd}$$
+The environment boundary produces unbatched tensors `(C, H, W)`, `(7,)`, `(13,)`, leaving batch dimension ownership strictly to the LeRobot preprocessor pipeline (`AddBatchDimensionProcessorStep`).
 
 #### B. Classical Perception & Kinematics Baselines (Rigorous Geometry)
 
@@ -327,7 +325,7 @@ To guarantee scientific credibility and statistical reproducibility, all evaluat
 ## 6. Architectural Reference Scaffold: `agentic_manipulation_benchmark.py`
 
 This module provides the architectural reference scaffold defining:
-1. Authentic 6-DoF articulated robot arm + parallel gripper MJCF with attached `ee_site` and in-hand `wrist_cam`.
+1. Authentic 6-DoF articulated robot arm + single-actuated parallel gripper with opposing fixed finger MJCF with attached `ee_site` and in-hand `wrist_cam`.
 2. Asynchronous concurrency: Cognitive supervisor thread decoupled from the deterministic 50 Hz control thread via a thread-safe `AtomicPlanState`.
 3. Dynamic camera calibration and ray unprojection with explicit `INVALID_DEPTH` error handling.
 4. Schema-constrained Pydantic supervisor with application-level validation and fixed `gemini-robotics-er-2-preview` model routing (no silent fallback).
@@ -409,7 +407,7 @@ REFERENCE_ARM_MJCF = """
                             <!-- In-Hand Wrist Camera Attached to Gripper Base -->
                             <camera name="wrist_cam" pos="0 0.035 0.02" euler="0 0.5 1.5708"/>
                             
-                            <!-- Parallel Jaw Gripper -->
+                            <!-- Single-Actuated Parallel Gripper (Sliding finger_joint1 + opposing fixed finger) -->
                             <body name="finger_left" pos="0 0.025 0.035">
                                 <joint name="finger_joint1" type="slide" axis="0 1 0" range="-0.025 0.025" damping="0.5" armature="0.01"/>
                                 <geom name="f1" type="box" size="0.006 0.006 0.025" rgba="0.9 0.75 0.1 1" mass="0.05" friction="1.5 0.01 0.001"/>
@@ -523,8 +521,12 @@ class CameraGeometry:
 # 3. Cognitive Supervisory Tier & Thread-Safe Concurrency
 # -----------------------------------------------------------------------------
 class SpatialGroundingPlan(BaseModel):
-    sub_goal: Literal["reach", "grasp", "lift", "transport", "recover"] = Field(
-        description="Active sub-task primitive"
+    """Structured spatial grounding plan emitted by Gemini Robotics ER 2.
+    Note on safety: should_halt is a supervisory software request; physical hardware
+    must enforce safety-rated emergency stop, joint limits, and watchdogs below this layer.
+    """
+    sub_goal: Literal["reach", "grasp", "lift", "transport", "place", "retreat", "recover"] = Field(
+        description="Canonical active sub-task primitive"
     )
     target_object: str = Field(description="Identified manipuland name, e.g. 'red_cube'")
     target_box_2d: List[int] = Field(description="Normalized [ymin, xmin, ymax, xmax] in [0, 1000]")
@@ -535,7 +537,8 @@ class SpatialGroundingPlan(BaseModel):
     requires_replanning: bool = Field(default=False, description="True if anomaly or grasp failure detected")
     replan_id: int = Field(default=0, description="Monotonically increasing identifier for anomaly recovery events")
     confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
-    should_halt: bool = Field(default=False, description="Emergency abort flag if collision or anomaly detected")
+    should_halt: bool = Field(default=False, description="Supervisory software halt request if anomaly detected")
+    decision_note: Optional[str] = Field(default="", description="Short operational observation, e.g. 'target shifted', 'grasp verified'")
 
     @field_validator("target_box_2d", "destination_box_2d")
     @classmethod
@@ -720,22 +723,51 @@ class ClassicalIKController:
             clipped[6] = np.clip(clipped[6], -0.025, 0.025)
         return clipped
 
-    def solve_ik_step(self, target_pos_world: np.ndarray, gripper_cmd: float = 0.02) -> np.ndarray:
-        """Computes 7-element actuator target position vector [q1..q6, q_grip]."""
+    def solve_ik_step(
+        self,
+        target_pos_world: np.ndarray,
+        target_rot_world: Optional[np.ndarray] = None,
+        gripper_cmd: float = 0.02,
+        orientation_weight: float = 0.15
+    ) -> np.ndarray:
+        """
+        Computes 7-element actuator target position vector [q1..q6, q_grip] via 6D Pose IK.
+        Supports explicit SO(3) target orientation or positional IK with downward nullspace posture.
+        """
         current_ee_pos = self.data.site_xpos[self.ee_site_id] if self.ee_site_id != -1 else self.data.xpos[self.model.body("gripper_base").id]
-        error = target_pos_world - current_ee_pos
+        pos_error = target_pos_world - current_ee_pos
 
         jac_pos = np.zeros((3, self.model.nv))
+        jac_rot = np.zeros((3, self.model.nv))
         if self.ee_site_id != -1:
-            mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.ee_site_id)
+            mujoco.mj_jacSite(self.model, self.data, jac_pos, jac_rot, self.ee_site_id)
         else:
-            mujoco.mj_jacBody(self.model, self.data, jac_pos, None, self.model.body("gripper_base").id)
+            mujoco.mj_jacBody(self.model, self.data, jac_pos, jac_rot, self.model.body("gripper_base").id)
 
-        # Slice 6 robot arm velocity DoFs (safe addressing)
-        j_arm = jac_pos[:, :6]
-        lambda_sq = (self.damping ** 2) * np.eye(3)
-        inv_term = np.linalg.inv(j_arm @ j_arm.T + lambda_sq)
-        dq = j_arm.T @ inv_term @ error
+        j_pos_arm = jac_pos[:, :6]
+        j_rot_arm = jac_rot[:, :6]
+
+        if target_rot_world is not None:
+            current_ee_mat = self.data.site_xmat[self.ee_site_id].reshape(3, 3) if self.ee_site_id != -1 else self.data.xmat[self.model.body("gripper_base").id].reshape(3, 3)
+            rot_error = 0.5 * (
+                np.cross(current_ee_mat[:, 0], target_rot_world[:, 0]) +
+                np.cross(current_ee_mat[:, 1], target_rot_world[:, 1]) +
+                np.cross(current_ee_mat[:, 2], target_rot_world[:, 2])
+            )
+            w = orientation_weight
+            j_6d = np.vstack([j_pos_arm, w * j_rot_arm])
+            e_6d = np.concatenate([pos_error, w * rot_error])
+            lambda_sq = (self.damping ** 2) * np.eye(6)
+            dq = j_6d.T @ np.linalg.inv(j_6d @ j_6d.T + lambda_sq) @ e_6d
+        else:
+            lambda_sq = (self.damping ** 2) * np.eye(3)
+            j_pinv = j_pos_arm.T @ np.linalg.inv(j_pos_arm @ j_pos_arm.T + lambda_sq)
+            dq_pos = j_pinv @ pos_error
+            pan = np.arctan2(target_pos_world[1], target_pos_world[0])
+            q_posture = np.array([pan, 0.6, 0.6, 0.0, 0.8, 0.0])
+            current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
+            n_proj = np.eye(6) - j_pinv @ j_pos_arm
+            dq = dq_pos + n_proj @ (0.4 * (q_posture - current_q))
 
         current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
         target_arm_q = current_q + np.clip(dq, -0.08, 0.08)
@@ -811,7 +843,7 @@ class ClassicalIKController:
 # -----------------------------------------------------------------------------
 # 5. Visuomotor Policy Tier: LeRobot ACT with Processors & Goal Conditioning
 # -----------------------------------------------------------------------------
-SUBGOAL_MAP = {"reach": 0, "grasp": 1, "lift": 2, "transport": 3, "recover": 4}
+SUBGOAL_MAP = {"reach": 0, "grasp": 1, "lift": 2, "transport": 3, "place": 4, "retreat": 5, "recover": 6}
 
 class GoalConditionedACTPolicyExecutor:
     """
@@ -819,42 +851,49 @@ class GoalConditionedACTPolicyExecutor:
     raw MuJoCo observation -> environment processor -> LeRobot policy preprocessor ->
     ACT select_action() -> LeRobot postprocessor -> environment/action adapter -> MuJoCo actuator.
     
-    Explicitly supports:
-    - Stock ACT environment state vector observation.environment_state in R^11 (target xyz, dest xyz, one-hot subgoal)
-    - Checkpoint-restored PolicyProcessorPipeline
-    - policy.reset() queue flushing upon dynamic disturbance recovery
-    - Actuator-specific command clipping
+    Primary Benchmark Execution Mode:
+    - Queue / Receding Horizon (chunk_size=50, n_action_steps=10, temporal_ensemble_coeff=None)
+    - Control frequency: 50 Hz, nominal inference cadence: ~5 Hz (every 10 steps).
+    - Recovery: policy.reset() flushes cached action queue and triggers immediate inference.
+    - Stock ACT environment state vector observation.environment_state in R^13 (target xyz, dest xyz, one-hot subgoal)
+    - Checkpoint-restored pre/post processors via make_pre_post_processors
+    - Unbatched observation boundary tensors (LeRobot pipeline owns batch dimension)
+    - Actuator-specific command clipping (arm: [-pi, pi], gripper: [-0.025, 0.025])
     """
     def __init__(
         self,
         pretrained_policy_path: Optional[str] = None,
+        chunk_size: int = 50,
+        n_action_steps: int = 10,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
         self.device = torch.device(device)
+        self.chunk_size = chunk_size
+        self.n_action_steps = n_action_steps
         self.policy = None
         self.preprocessor = None
         self.postprocessor = None
 
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
-                from lerobot.policies.act import ACTConfig, ACTPolicy
+                from lerobot.policies.act import ACTPolicy
                 self.policy = ACTPolicy.from_pretrained(pretrained_policy_path).to(self.device)
                 self.policy.eval()
                 self.policy.reset()
-                # In LeRobot 0.6+, load external preprocessor and postprocessor pipelines from checkpoint
+
+                # LeRobot 0.6+ official factory for restoring checkpoint pre/post-processors
                 try:
-                    from lerobot.processor.pipeline import PolicyProcessorPipeline
-                    self.preprocessor = PolicyProcessorPipeline.from_pretrained(
-                        pretrained_policy_path, filename="policy_preprocessor.json"
-                    )
-                    self.postprocessor = PolicyProcessorPipeline.from_pretrained(
-                        pretrained_policy_path, filename="policy_postprocessor.json"
-                    )
-                except Exception:
                     from lerobot.policies.factory import make_pre_post_processors
                     self.preprocessor, self.postprocessor = make_pre_post_processors(
-                        policy_cfg=self.policy.config
+                        policy_cfg=self.policy.config,
+                        pretrained_path=pretrained_policy_path,
                     )
+                    print(f"[PolicyExecutor] Restored pre/post processors from {pretrained_policy_path}")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to load policy pre/post-processors from checkpoint {pretrained_policy_path}: {e}"
+                    ) from e
+
                 print(f"[PolicyExecutor] Loaded LeRobot ACTPolicy from {pretrained_policy_path}")
             except Exception as e:
                 print(f"[PolicyExecutor] LeRobot checkpoint load notice: {e}. Defaulting to scaffold.")
@@ -873,17 +912,20 @@ class GoalConditionedACTPolicyExecutor:
     ) -> Dict[str, torch.Tensor]:
         """
         Stage 1: Raw MuJoCo observation -> Environment Processor.
-        Converts sensor arrays into raw tensor dictionary adhering to LeRobot dataset keys.
-        Stock LeRobot ACT consumes environment state vector via FeatureType.ENV.
+        Produces UNBATCHED tensors:
+        - images: (C, H, W)
+        - state: (7,)
+        - environment_state: (13,)
+        The LeRobot preprocessor pipeline owns batching (via AddBatchDimensionProcessorStep).
         """
         batch = {
-            "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).to(self.device),
-            "observation.images.wrist": torch.from_numpy(rgb_wrist).permute(2, 0, 1).unsqueeze(0).to(self.device),
-            "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
+            "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).to(self.device),
+            "observation.images.wrist": torch.from_numpy(rgb_wrist).permute(2, 0, 1).to(self.device),
+            "observation.state": torch.from_numpy(proprioception).float().to(self.device)
         }
         if goal_vector is not None:
-            # Stock ACT encoder_env_state_input_proj consumes FeatureType.ENV
-            batch["observation.environment_state"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
+            # Stock ACT encoder_env_state_input_proj consumes FeatureType.ENV (13-DoF)
+            batch["observation.environment_state"] = torch.from_numpy(goal_vector).float().to(self.device)
         return batch
 
     def environment_action_adapter(self, action: Any) -> np.ndarray:
@@ -893,7 +935,10 @@ class GoalConditionedACTPolicyExecutor:
         Arm joints 1..6 clip to [-pi, pi], gripper finger clips to [-0.025, 0.025].
         """
         if isinstance(action, torch.Tensor):
-            action_np = action.squeeze(0).detach().cpu().numpy()
+            if action.dim() > 1:
+                action_np = action.squeeze(0).detach().cpu().numpy()
+            else:
+                action_np = action.detach().cpu().numpy()
         else:
             action_np = np.asarray(action)
         clipped = np.copy(action_np)
@@ -918,8 +963,11 @@ class GoalConditionedACTPolicyExecutor:
             if self.preprocessor is not None:
                 batch = self.preprocessor(batch)
             else:
-                batch["observation.images.top"] = batch["observation.images.top"].float() / 255.0
-                batch["observation.images.wrist"] = batch["observation.images.wrist"].float() / 255.0
+                batch["observation.images.top"] = (batch["observation.images.top"].float() / 255.0).unsqueeze(0)
+                batch["observation.images.wrist"] = (batch["observation.images.wrist"].float() / 255.0).unsqueeze(0)
+                batch["observation.state"] = batch["observation.state"].unsqueeze(0)
+                if "observation.environment_state" in batch:
+                    batch["observation.environment_state"] = batch["observation.environment_state"].unsqueeze(0)
 
             with torch.no_grad():
                 raw_action = self.policy.select_action(batch)
@@ -1086,7 +1134,8 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
                 print(f"[System C Init Plan Notice] {e}")
 
     last_consumed_replan = 0
-    sim_steps = 250  # 5.0 seconds at 50 Hz control rate
+    sim_steps = 750  # 15.0 seconds at 50 Hz control rate (timeout threshold)
+    termination_reason = "timeout"
 
     for step in range(sim_steps):
         tick_start = time.perf_counter()
@@ -1112,6 +1161,24 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
                 last_consumed_replan = new_replan_id
                 print(f"[{t_sec:.2f}s] 🔄 [Recovery] Edge-triggered event {new_replan_id} detected! Resetting LeRobot action queue...")
                 policy_executor.reset()
+
+        # Multi-condition early termination checks
+        if plan is not None and plan.should_halt:
+            print(f"[{t_sec:.2f}s] 🛑 [Software Halt] Supervisor requested halt: {plan.decision_note}")
+            termination_reason = "software_halt"
+            break
+
+        cube_pos = arena.get_cube_ground_truth_pos()
+        if cube_pos[2] < 0.2:  # Cube dropped below workspace
+            print(f"[{t_sec:.2f}s] ❌ [Failure] Cube dropped below workspace (z={cube_pos[2]:.3f}m).")
+            termination_reason = "unrecoverable_failure"
+            break
+
+        dist_to_zone = np.linalg.norm(cube_pos[:2] - receptacle_pos[:2])
+        if dist_to_zone < 0.03 and cube_pos[2] < 0.44 and (plan and plan.sub_goal in ("place", "retreat")):
+            print(f"[{t_sec:.2f}s] ✅ [Success] Task complete! Cube successfully placed in target zone.")
+            termination_reason = "task_complete"
+            break
 
         # ---------------------------------------------------------------------
         # 50 Hz Controller Dispatch
@@ -1149,13 +1216,13 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
             action = policy_executor.select_action(rgb_top, rgb_wrist, proprio, goal_vector=None)
 
         elif system_id in ["system_c", "system_d"]:
-            # System C & D: Goal-conditioned ACT policy with 11-DoF environment_state
+            # System C & D: Goal-conditioned ACT policy with 13-DoF environment_state (target xyz, dest xyz, 7-class one-hot)
             if target_3d is not None and dest_3d is not None:
-                subgoal_one_hot = np.zeros(5, dtype=np.float32)
+                subgoal_one_hot = np.zeros(7, dtype=np.float32)
                 subgoal_one_hot[subgoal_idx] = 1.0
                 goal_vec = np.concatenate([target_3d.astype(np.float32), dest_3d.astype(np.float32), subgoal_one_hot])
             else:
-                goal_vec = np.zeros(11, dtype=np.float32)
+                goal_vec = np.zeros(13, dtype=np.float32)
 
             action = policy_executor.select_action(rgb_top, rgb_wrist, proprio, goal_vector=goal_vec)
 
@@ -1172,7 +1239,7 @@ def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = T
                 time.sleep(0.02 - elapsed)
 
     stop_event.set()
-    print(f"Benchmark Episode Completed for {system_id.upper()}.")
+    print(f"Benchmark Episode Completed for {system_id.upper()} after {step + 1} steps | Reason: {termination_reason}.")
 
 if __name__ == "__main__":
     run_benchmark_episode(system_id="system_d", has_disturbance=True)

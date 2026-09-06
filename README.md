@@ -33,30 +33,35 @@ The architecture decouples high-level semantic reasoning from high-frequency joi
 |           Google gemini-robotics-er-2-preview (Fixed Model)                   |
 |                                                                               |
 |   • Multi-modal spatial perception & zero-shot 2D bounding boxes [0, 1000]   |
-|   • Natural language goal decomposition (Reach ➔ Grasp ➔ Lift ➔ Place)       |
+|   • Natural language goal decomposition (7 canonical primitives)              |
+|   • Calibrated ray unprojection to 3D metric coordinates [x, y, z]            |
 |   • Visual anomaly detection & closed-loop self-correction replanning         |
 |   • Thread-safe AtomicPlanState shared memory (non-blocking 50 Hz loop)       |
 +---------------------------------------+---------------------------------------+
-                                        | Semantic Sub-goals & Bounding Boxes
+                                        | SpatialGroundingPlan ➔ Calibrated Ray Unprojection
+                                        | ➔ AtomicPlanState ➔ 13-DoF environment_state
                                         v
 +-------------------------------------------------------------------------------+
 |                    2. VISUOMOTOR POLICY CONTROLLER (50 Hz)                    |
 |           Hugging Face LeRobot (ACTPolicy / SmolVLA-450M in PyTorch)          |
 |                                                                               |
-|   • Dual-camera visual inputs (Overhead camera + Gripper wrist camera)        |
+|   • Dual-camera visual inputs (Overhead camera + Wrist eye-in-hand camera)    |
 |   • 7-DoF Proprioceptive joint angle state vector q ∈ ℝ^7                     |
-|   • Action Chunking with Transformers (K=50 steps, 1.0-second horizon)        |
-|   • Minimum-jerk polynomial affordance smoothing & EMA temporal ensembling    |
+|   • 13-DoF Goal vector conditioning [target_3d, dest_3d, one-hot subgoal]     |
+|   • Action Chunking (K=50 steps, 1.0s horizon) via Queue / Receding Horizon   |
+|   • LeRobot 0.6+ make_pre_post_processors pipeline integration               |
+|   • Edge-triggered policy.reset() queue flush upon disturbance recovery       |
 +---------------------------------------+---------------------------------------+
-                                        | Target Joint Commands (50 Hz)
+                                        | Target Actuator Position Commands (50 Hz)
                                         v
 +-------------------------------------------------------------------------------+
 |                    3. DETERMINISTIC PHYSICS SIMULATION (500 Hz)               |
-|            DeepMind MuJoCo 3.x (Headless GPU EGL Rendering @ >400 FPS)        |
+|            DeepMind MuJoCo 3.x (Headless GPU EGL Offscreen Rendering)         |
 |                                                                               |
-|   • 6-DoF robotic manipulator + 1-DoF parallel gripper                        |
+|   • 6-DoF robotic manipulator + single-actuated parallel gripper              |
 |   • Rigid-body contact dynamics, Coulomb friction, and object mass physics    |
-|   • Overhead & eye-in-hand cameras rendered in headless Linux environments    |
+|   • Synchronized overhead & eye-in-hand cameras rendered in headless Linux    |
+|   • 10 substeps (dt=0.002s) per 50 Hz control step                            |
 +-------------------------------------------------------------------------------+
 ```
 
@@ -126,14 +131,16 @@ lerobot-agentic/
 ├── src/lerobot_agentic/               # Clean Architecture: Separation of Concerns
 │   ├── sim/                           # [PHYSICS] MuJoCo simulation environment & MJCF models
 │   │   ├── env.py                     # 50 Hz control step, cameras, safe joint addressing
-│   │   └── models/embodied_arm.xml    # 6-DOF arm, parallel gripper, table, and cameras
-│   ├── cognitive/                     # [REASONING] 1–2 Hz Cognitive Supervisor
-│   │   ├── supervisor.py              # Gemini Robotics ER / Flash client + local CV fallback
-│   │   └── schemas.py                 # Pydantic SpatialGroundingPlan schemas
+│   │   └── models/embodied_arm.xml    # 6-DOF arm, single-actuated parallel gripper, table, cameras
+│   ├── cognitive/                     # [REASONING] ~0.5–2 Hz Cognitive Supervisor
+│   │   ├── supervisor.py              # Gemini Robotics ER client + local CV fallback
+│   │   └── schemas.py                 # Pydantic SpatialGroundingPlan schemas (7 primitives)
 │   ├── policy/                        # [MOTOR CONTROL] 50 Hz Visuomotor Policy
-│   │   └── executor.py                # ACTPolicy loading, temporal ensembling EMA, chunking
+│   │   └── executor.py                # GoalConditionedACTPolicyExecutor, queue mode, LeRobot processors
+│   ├── controllers/                   # [KINEMATICS] 6D Pose IK & Pick-and-Place FSM
+│   │   └── ik.py                      # ClassicalIKController (DLS 6D IK with posture nullspace)
 │   ├── dataset/                       # [DATA ENGINE] Expert Trajectory Harvesting
-│   │   └── generator.py               # Algorithmic expert solver collecting LeRobotDataset v2
+│   │   └── generator.py               # Algorithmic expert solver collecting LeRobotDataset v3.0
 │   └── utils/                         # Telemetry & Visualization
 │       └── recorder.py                # Video HUD recorder (bounding boxes, sub-goals, MP4/GIF)
 │
@@ -150,9 +157,11 @@ lerobot-agentic/
 │
 ├── tests/                             # Unit Test Suite (PyTest)
 │   ├── test_env.py                    # MuJoCo physics, kinematics, and EGL renderer tests
-│   └── test_schemas.py                # Pydantic spatial grounding validation tests
+│   ├── test_schemas.py                # Pydantic spatial grounding validation tests
+│   ├── test_controllers.py            # 6D Pose IK and Pick-and-Place FSM tests
+│   └── test_metrics.py                # Benchmark metrics and Wilson score CI tests
 │
-├── data/                              # Demonstration datasets (LeRobot v2 Parquet + MP4)
+├── data/                              # Demonstration datasets (LeRobot v3.0 Parquet + MP4)
 └── outputs/                           # Checkpoints, benchmark logs, and rollout videos
 ```
 

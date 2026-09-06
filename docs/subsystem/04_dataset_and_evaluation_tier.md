@@ -1,6 +1,6 @@
 # Subsystem 04: Dataset & Evaluation Tier
 
-The **Dataset & Evaluation Harness Tier** provides end-to-end data lifecycle management, algorithmic demonstration harvesting, and standardized benchmarking for `lerobot-agentic`. By combining an algorithmic **minimum-jerk inverse kinematics (IK) demonstration harvester** with the **Hugging Face LeRobotDataset v2.0 standard** and an **automated multi-metric evaluation harness**, this subsystem ensures reproducible training and rigorous verification of embodied policies.
+The **Dataset & Evaluation Harness Tier** provides end-to-end data lifecycle management, algorithmic demonstration harvesting, and standardized benchmarking for `lerobot-agentic`. By combining an algorithmic **minimum-jerk inverse kinematics (IK) demonstration harvester** with the **Hugging Face LeRobotDataset v3.0 standard** and an **automated multi-metric evaluation harness**, this subsystem ensures reproducible training and rigorous verification of embodied policies.
 
 ---
 
@@ -16,15 +16,16 @@ Robust robot learning demands both high-quality demonstration datasets and quant
 |   │ 1. Synthetic Demonstration Harvester                    │                                   |
 |   │    • 500 FPS headless MuJoCo rollout engine             │                                   |
 |   │    • Algorithmic minimum-jerk IK affordance solver      │                                   |
-|   │    • Automated 8-phase manipulation state machine       │                                   |
+|   │    • Automated 7-phase manipulation state machine       │                                   |
 |   └───────────────────────────┬─────────────────────────────┘                                   |
 |                               │ Raw Trajectories τ = {(o_t, a_t)}                               |
 |                               ▼                                                                 |
 |   ┌─────────────────────────────────────────────────────────┐                                   |
-|   │ 2. LeRobotDataset v2.0 Hub Packaging                    │                                   |
+|   │ 2. LeRobotDataset v3.0 Hub Packaging                    │                                   |
 |   │    • Apache Parquet tables (state, action, indices)     │                                   |
 |   │    • Chunked H.264 MP4 videos (top, wrist streams)      │                                   |
 |   │    • Z-score normalization statistics (meta/stats.json) │                                   |
+|   │    • Explicit dataset.finalize() episode lifecycle      │                                   |
 |   └───────────────────────────┬─────────────────────────────┘                                   |
 |                               │ Standardized Streaming Dataset                                  |
 |                               ▼                                                                 |
@@ -79,11 +80,29 @@ where $\mathbf{J}$ is the manipulator Jacobian and $\lambda \approx 10^{-3}$ is 
 
 ---
 
-## 3. Hugging Face `LeRobotDataset` Specification (v2.0 / v3.0)
+## 3. Hugging Face `LeRobotDataset` Specification (v3.0)
 
-Data storage strictly conforms to the Hugging Face `LeRobotDataset` schema (supporting v2.0 and v3.0 chunked formats), ensuring seamless compatibility with Hugging Face Hub streaming, `accelerate`, and LeRobot training tools.
+Data storage strictly conforms to the Hugging Face `LeRobotDataset` v3.0 specification (the standard format in LeRobot 0.6+), ensuring seamless compatibility with Hugging Face Hub streaming, `accelerate`, and LeRobot training tools.
 
-### 3.1 Directory Layout
+### 3.1 Lifecycle & Finalization Contract
+Episodes are recorded iteratively into the local dataset buffer. In accordance with LeRobot 0.6+ v3.0 requirements, the dataset lifecycle requires an explicit finalization call:
+```python
+dataset = LeRobotDataset.create(
+    repo_id="lerobot_embodied_arm",
+    fps=50,
+    features=FEATURES_SCHEMA,
+    use_videos=True,
+)
+for ep in episodes:
+    # Add frames to current episode buffer
+    ...
+    dataset.save_episode()
+
+# Authoritative finalize step: builds global index, compresses video chunks, computes meta/stats.json
+dataset.finalize()
+```
+
+### 3.2 Directory Layout
 ```text
 data/lerobot_embodied_arm/
 ├── meta/
@@ -101,19 +120,19 @@ data/lerobot_embodied_arm/
         └── observation.images.wrist.mp4
 ```
 
-### 3.2 Tensor Schema
+### 3.3 Tensor Schema
 | Key | Type | Shape | Meaning |
 | :--- | :--- | :--- | :--- |
 | `observation.images.top` | Video (H.264) | `(480, 640, 3)` | Overhead table workspace camera |
 | `observation.images.wrist` | Video (H.264) | `(480, 640, 3)` | Forearm wrist-mounted camera |
 | `observation.state` | Vector (Float32) | `(7,)` | Joint angles $q_{1\dots6}$ (rad) + gripper width $q_7$ (m) |
-| `observation.environment_state` | Vector (Float32) | `(11,)` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`) |
+| `observation.environment_state` | Vector (Float32) | `(13,)` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`), where $\mathbf{e}_{\text{subgoal}} \in \mathbb{R}^7$ (7 canonical subgoals) |
 | `action` | Vector (Float32) | `(7,)` | Target actuator position setpoints for step $t+1$ |
 | `task_index` | Scalar (Int64) | `()` | Task identifier (e.g., $0$ for pick-and-place) |
 | `timestamp` | Scalar (Float32) | `()` | Timestamp relative to episode onset ($t \times 0.02\,\text{s}$) |
 | `frame_index` | Scalar (Int64) | `()` | Monotonically increasing frame index |
 
-### 3.3 Normalization Statistics (`meta/stats.json`)
+### 3.4 Normalization Statistics (`meta/stats.json`)
 Before policy ingestion, states and actions are standardized using empirical dataset statistics:
 $$\tilde{s} = \frac{s - \mu_s}{\sigma_s + 10^{-8}}, \quad \tilde{a} = \frac{a - \mu_a}{\sigma_a + 10^{-8}}$$
 
@@ -140,7 +159,7 @@ The evaluation harness measures closed-loop policy performance across a battery 
 3. **Time-to-Completion (TTC)**:
    Measures operational efficiency:
    $$\mathrm{TTC} = t_{\text{complete}} - t_0 \quad (\text{seconds})$$
-   Standard benchmark timeout is capped at $T = 250$ steps ($5.0\,\text{s}$).
+   Standard benchmark timeout is capped at $T = 750$ steps ($15.0\,\text{s}$ @ 50 Hz) with multi-condition termination (`task_complete`, `unrecoverable_failure`, `timeout`, `software_halt`).
 
 4. **Joint Jerk Smoothness Metric ($\mathcal{J}$)**:
    Proxy for motion smoothness and aggressive actuator-command variation:

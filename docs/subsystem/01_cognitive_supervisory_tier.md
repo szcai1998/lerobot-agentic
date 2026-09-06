@@ -60,7 +60,7 @@ The Cognitive Supervisor implements a multi-tier model cascade to balance reason
 The primary engine leverages Google's frontier Embodied Reasoning model (`gemini-robotics-er-2-preview`). Specially trained on robotic manipulation trajectories, coordinate geometry, and spatial affordances, it performs direct bounding box regression and multi-step reasoning over input camera frames:
 - **Input Modality**: Overhead workspace camera RGB image (JPEG-compressed byte buffer) + task context prompt.
 - **Inference Mode**: Direct structured JSON generation via `google-genai` SDK with strict Pydantic schema enforcement.
-- **Latency Profile**: $\sim 450\text{--}800\,\text{ms}$ per round-trip query.
+- **Latency Target**: Planning target of $\sim 450\text{--}800\,\text{ms}$ per round-trip query, to be empirically profiled during Gate 0.
 
 ### 2.2 Fixed Supervisory Protocol & Deterministic Retry
 To maintain scientific experimental rigor (preventing silent mutation of the independent variable), the system strictly fixes the cognitive model to `gemini-robotics-er-2-preview` across Systems C and D.
@@ -71,7 +71,7 @@ To maintain scientific experimental rigor (preventing silent mutation of the ind
 If `GEMINI_API_KEY` is completely omitted from the environment, the supervisory tier falls back to a deterministic local perception pipeline:
 - Color segmentation and contour centroid analysis in HSV color space (`cv2.inRange`, `cv2.findContours`).
 - Default centered spatial priors ($[450, 480, 550, 560]$ in normalized coordinates).
-- Step-indexed state machine transition (e.g., switching from `reach` to `grasp_and_lift` at predefined temporal thresholds).
+- Step-indexed state machine transition across the 7 canonical primitives.
 
 ---
 
@@ -79,14 +79,16 @@ If `GEMINI_API_KEY` is completely omitted from the environment, the supervisory 
 
 All outputs from the Cognitive Supervisory Tier conform to a strongly-typed Pydantic model (`lerobot_agentic.cognitive.schemas.SpatialGroundingPlan`). This contract guarantees deterministic serialization between cloud LLM responses and local downstream motor execution.
 
+> [!IMPORTANT]
+> **Supervisory Software Request vs. Hardware E-Stop**: The `should_halt` flag is an advisory software-level abort request checked by the high-frequency control loop. It must NOT be confused with or substituted for a certified, hardware-interlocked safety Emergency Stop (E-Stop).
+
 ```python
 class SpatialGroundingPlan(BaseModel):
     """Structured spatial grounding and high-level cognitive plan emitted by Gemini Robotics ER."""
     sub_goal: Literal[
-        "reach", "grasp", "lift", "transport", "recover",
-        "reach_cube", "grasp_cube", "lift_cube", "transport_to_zone"
+        "reach", "grasp", "lift", "transport", "place", "retreat", "recover"
     ] = Field(
-        description="Concise active sub-task primitive"
+        description="Active atomic manipulation primitive from the 7 canonical stages"
     )
     target_object: str = Field(description="Target object name, e.g., 'red_cube'")
     target_box_2d: list[int] = Field(description="[ymin, xmin, ymax, xmax] normalized bounding box coordinates in [0, 1000]")
@@ -97,8 +99,14 @@ class SpatialGroundingPlan(BaseModel):
     requires_replanning: bool = Field(default=False, description="Emergency or disturbance trigger: True if object was displaced or grasp failed")
     replan_id: int = Field(default=0, description="Monotonically increasing identifier for anomaly recovery events")
     confidence_score: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence in spatial detection and affordance")
-    should_halt: bool = Field(default=False, description="Emergency abort flag if collision or anomaly detected")
-    reasoning: str | None = Field(default="", description="Brief chain of thought reasoning behind affordance choice")
+    should_halt: bool = Field(
+        default=False,
+        description="Advisory software stop flag; halts high-level trajectory dispatch (not a hardware-rated safety E-stop)"
+    )
+    decision_note: str | None = Field(
+        default="",
+        description="Structured rationale summarizing spatial affordance selection or anomaly diagnostics"
+    )
 
     @field_validator("target_box_2d", "destination_box_2d")
     @classmethod
@@ -144,24 +152,25 @@ stateDiagram-v2
     Grasp --> Lift: Stable Contact Established
     Lift --> Transport: Object Elevated Above Clearance
     Transport --> Place: Centered Over Destination Zone
-    Place --> Retract: Gripper Opened & Free
-    Retract --> Completed: Neutral Home Reached
+    Place --> Retreat: Gripper Opened & Free
+    Retreat --> Completed: Neutral Home Reached
     
-    Reach --> AnomalyHalt: Obstacle Collision
-    Grasp --> Reach: Slip Detected (Grasp Failed)
-    Lift --> Reach: Premature Drop Detected
-    Transport --> AnomalyHalt: Kinematic Limit Exceeded
-    AnomalyHalt --> [*]: Closed-Loop Human / System Intervention
+    Reach --> Recover: Obstacle Collision / Disturbance
+    Grasp --> Recover: Slip Detected (Grasp Failed)
+    Lift --> Recover: Premature Drop Detected
+    Transport --> Recover: Trajectory Perturbation
+    Recover --> Reach: Plan Reset & Re-anchored
     Completed --> [*]
 ```
 
-### 4.1 Sub-Goal Semantics
-- **`reach` / `reach_cube`**: Moves the end-effector from neutral pose toward an approach waypoint situated $\approx 5\text{ cm}$ directly above the target object. Gripper fingers remain open.
-- **`grasp` / `grasp_cube`**: Descends along the vertical approach vector into the grasp corridor and drives parallel gripper fingers into contact until force/displacement thresholds are satisfied.
-- **`lift` / `lift_cube`**: Accelerates vertically upward along the $+Z$ axis to verify force closure and elevate the manipuland above the table support plane ($z > 0.46\,\text{m}$).
-- **`transport` / `transport_to_zone`**: Traverses horizontal cartesian space toward the destination receptacle coordinates specified by `destination_box_2d`.
-- **`place` / `release`**: Descends end-effector into the receptacle, relaxes gripper actuators, and verifies object deposition.
-- **`retract`**: Ascends clear of the receptacle and returns the manipulator to the neutral observation configuration.
+### 4.1 Canonical Sub-Goal Semantics (7 Primitives)
+- **`reach`**: Moves the end-effector from neutral pose toward an approach waypoint situated $\approx 5\text{ cm}$ directly above the target object. Gripper fingers remain open.
+- **`grasp`**: Descends along the vertical approach vector into the grasp corridor and drives the sliding gripper finger into contact until force/displacement thresholds are satisfied.
+- **`lift`**: Accelerates vertically upward along the $+Z$ axis to verify force closure and elevate the manipuland above the table support plane ($z > 0.46\,\text{m}$).
+- **`transport`**: Traverses horizontal cartesian space toward the destination receptacle coordinates specified by `destination_box_2d`.
+- **`place`**: Descends end-effector into the receptacle, relaxes gripper actuators, and verifies object deposition.
+- **`retreat`**: Ascends clear of the receptacle and returns the manipulator to the neutral observation configuration.
+- **`recover`**: Dynamic corrective primitive triggered upon physical perturbation, slip, or displacement, flushing stale action queues via `policy.reset()` and re-establishing spatial grounding.
 
 ---
 
@@ -188,7 +197,7 @@ sequenceDiagram
             COG->>POL: SpatialGroundingPlan (sub_goal='grasp', should_halt=False)
             Note over POL: Continue / Adapt Action Chunking
         else Anomaly Detected (Slip / Unexpected Collision)
-            COG->>POL: SpatialGroundingPlan (should_halt=True, reasoning='Object slipped')
+            COG->>POL: SpatialGroundingPlan (should_halt=True, decision_note='Object slipped')
             POL->>ENV: Zero-Velocity Deceleration Command
             Note over POL,ENV: Execution Halted for Re-Planning
         end
@@ -196,8 +205,8 @@ sequenceDiagram
 ```
 
 ### 5.1 Monitored Failure Modes
-1. **Object Slip / Drop During Lift**: If the target cube remains at table elevation ($z \approx 0.43\,\text{m}$) while the sub-goal is `lift` or `transport`, the supervisor flags a grasp failure and transitions the state back to `reach`.
-2. **Kinematic Occlusion / Obstacle Intrusion**: If dynamic foreign bodies occlude the destination receptacle or enter the collision envelope, the supervisor emits `should_halt = True` with descriptive `reasoning`.
+1. **Object Slip / Drop During Lift**: If the target cube remains at table elevation ($z \approx 0.43\,\text{m}$) while the sub-goal is `lift` or `transport`, the supervisor flags a grasp failure, transitions the state to `recover`, and resets the policy queue.
+2. **Kinematic Occlusion / Obstacle Intrusion**: If dynamic foreign bodies occlude the destination receptacle or enter the collision envelope, the supervisor emits `should_halt = True` with descriptive `decision_note`.
 3. **Target Spatial Drift**: If dynamic pushing or rolling shifts the object bounding box $[y_{\min}, x_{\min}, y_{\max}, x_{\max}]$ beyond a 15% tolerance window, the downstream policy's affordance delta is re-centered immediately.
 
 ---

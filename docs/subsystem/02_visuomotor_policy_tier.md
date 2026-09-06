@@ -118,7 +118,7 @@ The perception pipeline processes two complementary viewpoints to resolve depth 
 Overhead Camera (480x640x3)     ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
 Wrist Camera (480x640x3)        ──► [ResNet-18 Backbone] ──► 1x1 Conv (512 -> 512) ──► Tokens (H' x W' x 512)
 Proprioception qpos (7-DoF)     ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
-Goal Vector (11-DoF env_state)  ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
+Goal Vector (13-DoF env_state)  ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
 CVAE Latent Vector z (32)       ──► [Linear Projection]  ─────────────────────────────► Token  (1 x 512)
 ```
 
@@ -132,52 +132,69 @@ CVAE Latent Vector z (32)       ──► [Linear Projection]  ─────�
    - $7$-dimensional vector: 6 arm joint angles $[q_1, \dots, q_6]$ (radians) + 1 gripper slide displacement $q_7$ (meters).
    - Normalized using dataset statistics $(\boldsymbol{\mu}_s, \boldsymbol{\sigma}_s)$ stored in `meta/stats.json`.
 4. **Goal Conditioning Vector (`observation.environment_state`)**:
-   - 11-dimensional vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`).
-   - Ingested via stock LeRobot ACT's native `encoder_env_state_input_proj`, conditioning the CVAE transformer on cognitive subgoals and 3D metric affordances without custom library forks.
+   - 13-dimensional vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`), where $\mathbf{e}_{\text{subgoal}} \in \mathbb{R}^7$ is a 7-class one-hot encoding corresponding to the 7 canonical primitives: `["reach", "grasp", "lift", "transport", "place", "retreat", "recover"]`.
+   - Ingested via stock LeRobot ACT's native `encoder_env_state_input_proj`, conditioning the CVAE transformer on cognitive subgoals and metric 3D affordances without custom library forks.
 
 ---
 
-## 5. Temporal Ensembling (EMA Receding Horizon)
+## 5. Inference Execution Modes & Action Queuing
 
-Executing consecutive action chunks naively every 50 steps causes discontinuity ("stitching jerk") at chunk boundaries. To ensure smooth, continuous motion, `lerobot-agentic` implements **Exponential Moving Average (EMA) Temporal Ensembling**.
+### 5.1 Primary Benchmark Mode: Queue / Receding Horizon
+In the primary benchmark configuration:
+- Parameters: `chunk_size = 50`, `n_action_steps = 10`, `temporal_ensemble_coeff = None`.
+- **Temporal Decoupling**: ACT predicts a 50-step action chunk (1.0 s horizon). The control loop consumes $n_{\text{action\_steps}} = 10$ actions at 50 Hz before triggering the next model inference, yielding a nominal inference cadence of $\approx 5\,\text{Hz}$ ($\Delta t = 200\,\text{ms}$).
+- **Edge-Triggered Queue Reset**: When a supervisory recovery event is asserted (`replan_id` increments), calling `policy.reset()` instantly flushes stale buffered actions, ensuring newly generated corrective trajectories execute with zero latency.
 
-At each 50 Hz control step $t$, the policy performs inference, obtaining a new prediction chunk. The executed action $\bar{a}_t$ is computed as an exponentially-weighted blend of all overlapping historical chunks predicting for step $t$:
+### 5.2 Optional Ablation Mode: Temporal Action Ensembling (EMA)
+As an optional secondary ablation, `lerobot-agentic` supports continuous Exponential Moving Average (EMA) Temporal Ensembling:
+- At each 50 Hz control step $t$, the policy performs inference, obtaining a new prediction chunk. The executed action $\bar{a}_t$ is computed as an exponentially-weighted blend of all overlapping historical chunks predicting for step $t$:
 
 $$\bar{a}_t = \frac{\sum_{i=0}^{\min(t, K-1)} w_i \cdot \hat{a}_{t-i}[i]}{\sum_{i=0}^{\min(t, K-1)} w_i}$$
 
-where:
-- $\hat{a}_{t-i}[i]$ is the $i$-th step of the action chunk predicted at timestep $t-i$.
-- $w_i = \exp(-m \cdot i)$ is the exponential decay weight with decay rate $m \in [0.01, 0.1]$.
-- Smaller $i$ (more recent inferences) receive higher weights, enabling rapid dynamic correction while maintaining trajectory continuity.
+where $w_i = \exp(-m \cdot i)$ is the exponential decay weight ($m \in [0.01, 0.1]$).
 
 ---
 
-## 6. Autonomous Minimum-Jerk Affordance Trajectory Engine
+## 6. Pre/Post Processor Pipeline Architecture
 
-When running without pretrained neural network weights (e.g., during cold-start verification or synthetic demonstration harvesting), `VisuomotorPolicyExecutor` activates its internal **Quintic Minimum-Jerk Polynomial Trajectory Engine**.
+In accordance with modern LeRobot 0.6+ pipeline discipline, normalization and tensor transformations are encapsulated in explicit pre/post processor pipelines rather than hardcoded in the policy forward pass:
 
-### 6.1 Quintic Polynomial Formulation
-To transition joint positions smoothly from initial configuration $q(0)$ to target configuration $q(1)$ with zero initial and terminal velocities ($\dot{q}(0) = \dot{q}(1) = 0$) and accelerations ($\ddot{q}(0) = \ddot{q}(1) = 0$):
-
-$$s(\tau) = 10\tau^3 - 15\tau^4 + 6\tau^5, \quad \tau = \frac{t}{K} \in [0, 1]$$
-$$q(\tau) = q_0 + s(\tau) \cdot \Delta q$$
-
-This quintic formulation mathematically minimizes total jerk:
-$$\min \int_0^1 \left\| \dddot{q}(\tau) \right\|^2 d\tau$$
-
-### 6.2 Affordance Grounding Mapping
-The policy executor maps normalized 2D bounding boxes $[y_{\min}, x_{\min}, y_{\max}, x_{\max}] \in [0, 1000]^4$ directly to joint target offsets $\Delta q \in \mathbb{R}^7$:
-
-$$\Delta x = \frac{x_{\min} + x_{\max}}{2000} - 0.5, \quad \Delta y = \frac{y_{\min} + y_{\max}}{2000} - 0.5$$
-
-Depending on the active sub-goal directive:
-- **`reach`**: $\Delta q_1 = 0.9 \cdot \Delta x$ (base pan), $\Delta q_2 = -0.5 \cdot \Delta y$ (shoulder lift), $\Delta q_3 = 0.25$ (elbow extend), $\Delta q_5 = 0.35$ (wrist pitch down), $\Delta q_7 = 0.02$ (open gripper).
-- **`grasp`**: $\Delta q_2 = -0.6 \cdot \Delta y$, $\Delta q_3 = 0.32$, $\Delta q_7 = -0.015$ (close gripper).
-- **`lift`**: $\Delta q_2 = -0.2$, $\Delta q_3 = 0.1$, $\Delta q_7 = -0.015$ (maintain grasp force).
+```
+Raw MuJoCo Observation
+        │  Top RGB: (480, 640, 3) in [0, 255] uint8
+        │  Wrist RGB: (480, 640, 3) in [0, 255] uint8
+        │  Proprioception: (7,) float32
+        │  Environment State: (13,) float32
+        ▼
+Environment Processor (Zero Copy / Adapter)
+        │  Unbatched Tensors:
+        │  - observation.images.top: (3, 480, 640) float32 in [0, 1]
+        │  - observation.images.wrist: (3, 480, 640) float32 in [0, 1]
+        │  - observation.state: (7,) float32
+        │  - observation.environment_state: (13,) float32
+        ▼
+LeRobot Policy Preprocessor Pipeline (restored via make_pre_post_processors)
+        │  - AddBatchDimensionProcessorStep -> (1, ...)
+        │  - DeviceProcessorStep -> GPU VRAM
+        │  - NormalizerProcessorStep (Mean/Std or Min/Max from stats.json)
+        ▼
+ACT select_action(batch)
+        │  Outputs normalized action: (1, 7)
+        ▼
+LeRobot Postprocessor Pipeline
+        │  - UnnormalizerProcessorStep -> Physical joint units (rad, m)
+        │  - DeviceProcessorStep -> Host CPU
+        │  - RemoveBatchDimensionProcessorStep -> (7,)
+        ▼
+Action / Joint Adapter
+        │  - Joint command clamping: [-pi, pi] for arm joints, [-0.025, 0.025] for gripper finger
+        ▼
+MuJoCo Actuator Positions (50 Hz)
+```
 
 ---
 
 ## 7. Implementation Reference
 
 The Visuomotor Policy Tier is implemented in:
-- **`src/lerobot_agentic/policy/executor.py`**: `VisuomotorPolicyExecutor` class orchestrating model loading (`ACTPolicy.from_pretrained`), observation formatting, tensor device management, minimum-jerk interpolation, and action chunk generation.
+- **`src/lerobot_agentic/policy/executor.py`**: `GoalConditionedACTPolicyExecutor` orchestrating checkpoint restoration (`make_pre_post_processors`), observation serialization, 13-DoF goal vector encoding, queue-based receding horizon execution, and dynamic recovery queue flushing (`policy.reset()`).

@@ -41,15 +41,21 @@ This file records the current project status, active hardware profile, verified 
    - Dual-camera rendering (`overhead_cam` + `wrist_cam`) verified in `MuJoCoRobotEnv`.
    - Joint addresses safely mapped via `model.jnt_qposadr`.
 4. **Visuomotor Policy & Stock LeRobot ACT Integration:**
-   - Goal conditioning vector $\mathbf{g}_t \in \mathbb{R}^{11}$ mapped to stock LeRobot ACT's native `observation.environment_state` (`FeatureType.ENV`) projected by `encoder_env_state_input_proj` (zero custom library fork).
+   - 13-DoF goal conditioning vector $\mathbf{g}_t \in \mathbb{R}^{13}$ (target xyz, dest xyz, 7-class one-hot across canonical primitives `["reach", "grasp", "lift", "transport", "place", "retreat", "recover"]`) mapped to stock LeRobot ACT's native `observation.environment_state` (`FeatureType.ENV`) projected by `encoder_env_state_input_proj` (zero custom library fork).
+   - LeRobot 0.6+ pre/post processor pipeline restored via `make_pre_post_processors(policy_cfg=..., pretrained_path=...)`; environment boundary emits unbatched tensors `(3, H, W)`, `(7,)`, `(13,)` so LeRobot preprocessor owns batching.
+   - Primary benchmark mode: Queue / Receding Horizon (`chunk_size=50`, `n_action_steps=10`, `temporal_ensemble_coeff=None`), operating at 50 Hz control, ~5 Hz inference cadence.
    - `policy.reset()` queue flush edge-triggered via `replan_id` / `replan_consumed` tracking in `AtomicPlanState`.
    - Actuator-specific command limits: arm joints 1..6 clipped to $\pm 3.14159$, linear gripper slide joint clipped to $[-0.025, 0.025]\,\text{m}$.
-   - 7-stage Pick-and-Place FSM (`PREGRASP` -> `APPROACH` -> `GRASP` -> `LIFT` -> `TRANSPORT` -> `PLACE` -> `RETREAT`) implemented for Oracle and System A.
-5. **Thread Safety & Clock Pacing:**
+   - 6D Pose IK with downward orientation constraint ($R \in SO(3)$) and secondary nullspace posture projection implemented in `ClassicalIKController` for Oracle and System A.
+   - 7-stage Pick-and-Place FSM (`PREGRASP` -> `APPROACH` -> `GRASP` -> `LIFT` -> `TRANSPORT` -> `PLACE` -> `RETREAT`).
+5. **Thread Safety, Clock Pacing & Termination:**
    - Multi-threaded rendering race prevented via `LatestFrameBuffer`: only the simulation thread accesses MuJoCo `MjData` and `Renderer`, pushing immutable frame copies to the supervisor.
-   - 50 Hz real-time wall-clock pacing enforced for cloud-in-the-loop Systems C & D (`time.perf_counter()`), ensuring 5.0 simulated seconds equal 5.0 physical seconds.
+   - 50 Hz real-time wall-clock pacing enforced for cloud-in-the-loop Systems C & D (`time.perf_counter()`), ensuring simulated time tracks physical wall-clock time.
+   - Standardized 15.0 s (750 steps @ 50 Hz) episode timeout with multi-condition early termination (`task_complete`, `unrecoverable_failure`, `timeout`, `software_halt`).
+   - `SpatialGroundingPlan` uses `decision_note`; advisory software halt explicitly separated from hardware safety E-stop.
+   - Standardized on LeRobotDataset v3.0 with explicit `dataset.finalize()` lifecycle call.
 6. **Test Suite & Code Hygiene:**
-   - Unit tests passing 100% (`pytest tests/ -v`: 18/18 passed).
+   - Unit tests passing 100% (`pytest tests/ -v`: 20/20 passed).
    - Linting clean (`ruff check .`: 0 errors).
    - Simulation rollout passing (`run_rollout.py --steps 50`).
 

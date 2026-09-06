@@ -58,7 +58,7 @@ At each timestep $t$, the state observation $o_t$ and action $a_t$ consist of:
 | `observation.images.top` | `(480, 640, 3)` | `uint8` | Overhead perspective camera covering table workspace |
 | `observation.images.wrist` | `(480, 640, 3)` | `uint8` | Gripper eye-in-hand camera providing fine-grained alignment |
 | `observation.state` | `(7,)` | `float32` | Current 6 joint angles $[q_1, \dots, q_6] \in [-\pi, \pi]$ + gripper width $q_7$ |
-| `observation.environment_state` | `(11,)` | `float32` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`) |
+| `observation.environment_state` | `(13,)` | `float32` | Goal vector: $[\mathbf{p}_{\text{target}}^{3D}, \mathbf{p}_{\text{dest}}^{3D}, \mathbf{e}_{\text{subgoal}}]$ (`FeatureType.ENV`), with $\mathbf{e}_{\text{subgoal}} \in \mathbb{R}^7$ |
 | `action` | `(7,)` | `float32` | Target joint positions for step $t+1$ sent to MuJoCo actuators |
 | `task_index` | `()` | `int64` | Discrete task identifier |
 
@@ -72,12 +72,13 @@ Unlike computer vision classification datasets that require millions of images, 
 
 Because demonstrations are generated algorithmically using our MuJoCo expert solver running at $\sim 500\text{ FPS}$, recording 50 complete episodes takes **less than 2 minutes**.
 
-### 2.4 Storage Format: Hugging Face `LeRobotDataset` v2.0
-Data is not stored as loose uncompressed PNG files (which degrades disk I/O and training throughput). Instead, it uses the official Hugging Face LeRobot standard:
+### 2.4 Storage Format: Hugging Face `LeRobotDataset` v3.0
+Data is not stored as loose uncompressed PNG files (which degrades disk I/O and training throughput). Instead, it uses the official Hugging Face LeRobot v3.0 standard:
 1. **Metadata & Tensors**: Apache Parquet files (`data/chunk-000/episode_000000.parquet`) storing numerical vectors and frame indices.
 2. **Video Streams**: Chunked MP4 files encoded with H.264 (`videos/chunk-000/observation.images.top.mp4`). PyTorch reads these via `torchvision` / PyAV hardware-accelerated decoders.
 3. **Normalization Statistics (`meta/stats.json`)**: Empirical mean and standard deviation $(\mu_s, \sigma_s)$ and $(\mu_a, \sigma_a)$ computed over the entire dataset for z-score normalization:
    $$\tilde{s}_t = \frac{s_t - \mu_s}{\sigma_s + \epsilon}, \quad \tilde{a}_t = \frac{a_t - \mu_a}{\sigma_a + \epsilon}$$
+4. **Finalization Lifecycle**: `dataset.finalize()` is explicitly invoked after all episodes are recorded to build the global index and compute dataset-wide statistics.
 
 ---
 
@@ -148,10 +149,11 @@ Where:
 2. **KL Divergence**: Regularizes the encoder posterior $q_\phi(z \mid \mathbf{A}, s)$ towards standard Gaussian prior $\mathcal{N}(0, I)$.
 3. **$\beta$ hyperparameter**: Set to $\beta = 10.0$ to balance reconstruction precision and latent smoothness.
 
-### 3.4 Temporal Ensembling at Inference Time
-At inference, the policy queries a new chunk every timestep (or every $n$ steps) and computes an **Exponential Moving Average (EMA)** across overlapping predictions:
-$$a_t = \frac{\sum_{i=0}^{\min(t, K-1)} w_i \cdot \mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t, K-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
-Where $m = 0.01\text{--}0.05$ is the decay weighting. This produces **smooth, jitter-free trajectories** with zero hand-tuned PID smoothing filters.
+### 3.4 Inference Execution Modes & Action Queuing
+* **Primary Benchmark Mode (Queue / Receding Horizon)**: `chunk_size = 50`, `n_action_steps = 10`, `temporal_ensemble_coeff = None`. ACT predicts a 50-step action chunk (1.0 s horizon). The 50 Hz control loop consumes $n_{\text{action\_steps}} = 10$ actions before triggering the next inference (~5 Hz cadence). Upon disturbance recovery, `policy.reset()` flushes the action queue immediately.
+* **Secondary Ablation Mode (Temporal Action Ensembling / EMA)**: The policy queries a new chunk every timestep and computes an **Exponential Moving Average (EMA)** across overlapping predictions:
+  $$a_t = \frac{\sum_{i=0}^{\min(t, K-1)} w_i \cdot \mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t, K-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
+  Where $m = 0.01\text{--}0.05$ is the decay weighting.
 
 ---
 

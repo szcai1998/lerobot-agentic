@@ -77,7 +77,7 @@ def test_atomic_plan_state_concurrency():
     assert state.get_snapshot()[0] is None
 
     plan = SpatialGroundingPlan(
-        sub_goal="reach_cube",
+        sub_goal="reach",
         target_object="red_cube",
         target_box_2d=[400, 400, 600, 600],
         task_progress="in_progress",
@@ -90,7 +90,7 @@ def test_atomic_plan_state_concurrency():
     snap_plan, snap_t, snap_d, snap_sub, snap_v = state.get_snapshot()
 
     assert snap_v == 1
-    assert snap_plan.sub_goal == "reach_cube"
+    assert snap_plan.sub_goal == "reach"
     assert np.allclose(snap_t, target_pos)
     assert np.allclose(snap_d, dest_pos)
     assert snap_sub == 0

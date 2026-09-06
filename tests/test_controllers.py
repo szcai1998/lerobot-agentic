@@ -82,3 +82,23 @@ def test_pick_and_place_fsm():
 
     # Should have transitioned from PREGRASP to APPROACH
     assert stage in ["APPROACH", "GRASP"]
+
+
+def test_6d_pose_ik():
+    """Verifies that 6D Pose IK executes with explicit orientation matrix."""
+    env = MuJoCoRobotEnv()
+    ik = ClassicalIKController(env.model, env.data, damping=0.05)
+
+    target_pos = np.array([0.32, 0.05, 0.45], dtype=np.float64)
+    target_rot = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, -1.0]
+    ], dtype=np.float64)
+
+    cmd = ik.solve_ik_step(target_pos, target_rot_world=target_rot, gripper_cmd=0.015)
+    assert len(cmd) == 7
+    assert not np.any(np.isnan(cmd))
+    assert np.isclose(cmd[-1], 0.015)
+    assert np.all(cmd[:6] <= 3.14159)
+    assert np.all(cmd[:6] >= -3.14159)

@@ -83,7 +83,7 @@ The MJCF model (`embodied_arm.xml`) configures:
 
 ## 3. Robot Arm Kinematics & Actuation Model
 
-The simulated manipulator is a 6-DoF articulated arm equipped with a 1-DoF symmetric parallel-jaw gripper ($d_a = 7$).
+The simulated manipulator is a 6-DoF articulated arm equipped with a single-actuated parallel gripper with an opposing fixed finger ($d_a = 7$).
 
 ### 3.1 Kinematic Chain & Limits
 ```
@@ -91,8 +91,8 @@ Base Link (z=0.4m) ──► Joint 1 (Yaw, ±π) ──► Joint 2 (Pitch, ±π/
                                                                              │
 Palm / Gripper Base ◄── Joint 6 (Roll, ±π) ◄── Joint 5 (Pitch, ±π/2) ◄── Joint 4 (Yaw, ±π)
        │
-       ├──► Left Finger  (finger_joint1, slide, range: [-0.025m, 0.025m])
-       └──► Right Finger (coupled symmetric passive geometry)
+       ├──► Active Sliding Finger (finger_joint1, slide, range: [-0.025m, 0.025m])
+       └──► Opposing Fixed Finger (finger_right, rigid opposing contact geometry)
 ```
 
 | Joint Name | Type | Axis | Physical Range | PD Gain ($k_p$) | Joint Damping | Joint Armature |
@@ -190,7 +190,7 @@ Before importing OpenGL or MuJoCo rendering contexts, the environment exports:
 if "MUJOCO_GL" not in os.environ:
     os.environ["MUJOCO_GL"] = "egl"
 ```
-This forces MuJoCo to allocate offscreen framebuffers using NVIDIA EGL drivers, achieving $>200\,\text{FPS}$ rendering throughput on an RTX 3070 without requiring a virtual X11 server (Xvfb).
+This forces MuJoCo to allocate offscreen framebuffers using NVIDIA EGL drivers, targeting high rendering throughput (>200 FPS) on an RTX 3070 without requiring a virtual X11 server (Xvfb), to be empirically benchmarked during Gate 0.
 
 ---
 

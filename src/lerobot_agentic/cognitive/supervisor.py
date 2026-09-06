@@ -46,8 +46,9 @@ class CognitiveSupervisor:
         Examine the camera image. Identify:
         1. Target manipuland object to pick/interact with
         2. Receptacle or destination zone
-        3. Immediate next sub-goal (reach, grasp, lift, place)
+        3. Immediate next sub-goal (strictly one of: reach, grasp, lift, transport, place, retreat, recover)
         4. Normalized bounding boxes [ymin, xmin, ymax, xmax] in range [0, 1000].
+        5. Short operational decision note (e.g. 'target acquired', 'slip detected')
         
         Strictly adhere to the JSON schema.
         """
