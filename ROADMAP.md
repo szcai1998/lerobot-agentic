@@ -3,7 +3,7 @@
 > **Status:** Active Project Roadmap  
 > **Target Architecture:** Dual-Rate Hierarchical Manipulation (1–2 Hz Cognitive ER + 50 Hz LeRobot Visuomotor ACT + 500 Hz MuJoCo Physics)  
 > **Target Hardware:** NVIDIA GeForce RTX 3070 (8GB VRAM Ampere) / Linux x86_64  
-> **Frameworks:** Google Gemini Robotics ER (`gemini-robotics-er-2-preview` / `gemini-2.0-flash`), Hugging Face `lerobot` (v0.4.x / PyTorch), DeepMind MuJoCo 3.x (Headless EGL)
+> **Frameworks:** Google Gemini Robotics ER (`gemini-robotics-er-2-preview`), Hugging Face `lerobot` (v0.4.x / PyTorch), DeepMind MuJoCo 3.x (Headless EGL)
 
 ---
 
@@ -126,7 +126,7 @@ print(f'✅ Foundation Verified: PyTorch {torch.__version__} (CUDA: {torch.cuda.
 ## 📷 Stage 2: Dual-Camera Simulation Arena & Cognitive Perception
 
 ### 1. Goal
-Upgrade the MuJoCo simulation arena to support dual camera perspectives (`top` overhead camera and `wrist` in-hand camera fixed to `gripper_base`), add a randomized table workspace with a target drop zone, and implement a hybrid Cognitive Supervisor combining Google Gemini Robotics ER (`gemini-robotics-er-2-preview` / `gemini-2.0-flash`) with an offline OpenCV local affordance fallback.
+Upgrade the MuJoCo simulation arena to support dual camera perspectives (`top` overhead camera and `wrist` in-hand camera fixed to `gripper_base`), add a randomized table workspace with a target drop zone, and implement a hybrid Cognitive Supervisor combining Google Gemini Robotics ER (`gemini-robotics-er-2-preview`) with an offline OpenCV local affordance fallback.
 
 ### 2. Input for Start (Prerequisites)
 - Stage 1 completed and verified.
@@ -325,7 +325,7 @@ Implement a rigorous closed-loop evaluation harness and telemetry video generato
     - **Grasp Success Rate (%)**: Successful object closure and lift.
     - **Task Placement Success Rate (%)**: Deposit within green receptacle zone.
     - **Mean Execution Time (s)**: Wall-clock and simulation time to task completion.
-    - **Trajectory Smoothness (mean joint jerk $\frac{d^3 q}{dt^3}$ in $\text{rad}/\text{s}^3$)**: Quantifies mechanical wear and control smoothness.
+    - **Trajectory Smoothness (mean joint jerk $\frac{d^3 q}{dt^3}$ in $\text{rad}/\text{s}^3$)**: Proxy for motion smoothness and aggressive actuator-command variation (validate against baseline).
     - **Inference Latency (ms/chunk)**: 50Hz control loop budget adherence.
   - Saves machine-readable results to `outputs/benchmarks/eval_results.json`.
 - **Enriched HUD Video Recorder `src/lerobot_agentic/utils/recorder.py`**:

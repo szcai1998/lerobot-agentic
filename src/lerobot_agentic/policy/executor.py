@@ -1,29 +1,34 @@
 import os
 import time
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 import numpy as np
 import torch
+
 
 class VisuomotorPolicyExecutor:
     """
     Manages inference and action chunk execution for LeRobot policies (ACT, Diffusion, SmolVLA)
-    with smooth temporal ensembling and affordance-directed trajectory interpolation.
+    with smooth temporal ensembling, PolicyProcessorPipeline integration, and affordance-directed
+    trajectory interpolation.
     """
     def __init__(
         self,
-        pretrained_policy_path: Optional[str] = None,
+        pretrained_policy_path: str | None = None,
         chunk_size: int = 50,
         action_dim: int = 7,
-        device: Optional[str] = None
+        device: str | None = None
     ):
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = torch.device(device)
-            
+
         self.chunk_size = chunk_size
         self.action_dim = action_dim
         self.policy = None
+        self.preprocessor = None
+        self.postprocessor = None
 
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
@@ -31,29 +36,116 @@ class VisuomotorPolicyExecutor:
                 self.policy = ACTPolicy.from_pretrained(pretrained_policy_path).to(self.device)
                 self.policy.eval()
                 self.policy.reset()
+
+                # LeRobot 0.6+ PolicyProcessorPipeline initialization
+                try:
+                    from lerobot.policies import make_pre_post_processors
+                    self.preprocessor, self.postprocessor = make_pre_post_processors(
+                        policy_cfg=self.policy.config
+                    )
+                except Exception:  # noqa: BLE001, S110
+                    # Preprocessor pipeline optional depending on checkpoint metadata
+                    pass
+
                 print(f"[PolicyExecutor] Loaded Hugging Face LeRobot ACTPolicy from {pretrained_policy_path}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"[PolicyExecutor] LeRobot checkpoint load warning: {e}. Defaulting to hybrid trajectory engine.")
+
+    def reset(self):
+        """Flushes any cached action chunk queue in the policy during replanning."""
+        if self.policy is not None and hasattr(self.policy, "reset"):
+            self.policy.reset()
+
+    def environment_processor(
+        self,
+        rgb_top: np.ndarray,
+        proprioception: np.ndarray,
+        rgb_wrist: np.ndarray | None = None,
+        goal_vector: np.ndarray | None = None
+    ) -> dict[str, torch.Tensor]:
+        """
+        Stage 1: Raw MuJoCo observation -> Environment Processor.
+        Converts sensor arrays into raw tensor dictionary adhering to LeRobot dataset keys.
+        """
+        batch = {
+            "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).to(self.device),
+            "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
+        }
+        if rgb_wrist is not None:
+            batch["observation.images.wrist"] = torch.from_numpy(rgb_wrist).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        if goal_vector is not None:
+            batch["observation.goal"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
+        return batch
+
+    def environment_action_adapter(self, action: Any) -> np.ndarray:
+        """
+        Stage 5: Environment / Action Adapter -> MuJoCo actuator command.
+        Converts postprocessed tensor to numpy joint command and clips to actuator limits.
+        """
+        if isinstance(action, torch.Tensor):
+            action_np = action.squeeze(0).detach().cpu().numpy()
+        else:
+            action_np = np.asarray(action)
+        return np.clip(action_np, -3.14, 3.14)
+
+    def select_action(
+        self,
+        rgb_top: np.ndarray,
+        proprioception: np.ndarray,
+        rgb_wrist: np.ndarray | None = None,
+        goal_vector: np.ndarray | None = None
+    ) -> np.ndarray:
+        """
+        Executes single 50 Hz control step following the LeRobot 0.6+ PolicyProcessorPipeline:
+        raw MuJoCo obs -> env processor -> policy preprocessor -> ACT select_action() -> postprocessor -> action adapter.
+        """
+        if self.policy is not None:
+            # 1. Environment Processor
+            batch = self.environment_processor(rgb_top, proprioception, rgb_wrist, goal_vector)
+
+            # 2. LeRobot Policy Preprocessor (externalized normalization)
+            if self.preprocessor is not None:
+                batch = self.preprocessor(batch)
+            else:
+                batch["observation.images.top"] = batch["observation.images.top"].float() / 255.0
+                if "observation.images.wrist" in batch:
+                    batch["observation.images.wrist"] = batch["observation.images.wrist"].float() / 255.0
+
+            # 3. Policy select_action() (manages internal temporal action chunk queue)
+            with torch.no_grad():
+                raw_action = self.policy.select_action(batch)
+
+            # 4. LeRobot Policy Postprocessor (externalized denormalization)
+            if self.postprocessor is not None:
+                processed_action = self.postprocessor(raw_action)
+            else:
+                processed_action = raw_action
+
+            # 5. Environment / Action Adapter
+            return self.environment_action_adapter(processed_action)
+
+        return proprioception
 
     def predict_action_chunk(
         self,
         rgb_observation: np.ndarray,
         proprioception: np.ndarray,
-        goal_box: Optional[List[int]] = None,
-        sub_goal: str = "reach"
+        goal_box: list[int] | None = None,
+        sub_goal: str = "reach",
+        rgb_wrist: np.ndarray | None = None,
+        goal_vector: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Generates an action chunk of shape (chunk_size, action_dim) at 50Hz.
-        Conditioned on multi-modal visual observations and cognitive spatial bounding boxes.
+        Conditioned on multi-modal visual observations and cognitive spatial bounding boxes / goal vector.
         """
         if self.policy is not None:
-            obs_dict = {
-                "observation.images.top": torch.from_numpy(rgb_observation).permute(2, 0, 1).unsqueeze(0).float().to(self.device) / 255.0,
-                "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
-            }
-            with torch.no_grad():
-                action = self.policy.select_action(obs_dict)
-            return action.cpu().numpy()
+            # Step the policy chunk_size times to build a chunk
+            actions = []
+            for _ in range(self.chunk_size):
+                act = self.select_action(rgb_observation, proprioception, rgb_wrist, goal_vector)
+                actions.append(act)
+            return np.stack(actions, axis=0)
 
         # Minimum-jerk polynomial trajectory generation toward affordance target
         chunk = np.tile(proprioception, (self.chunk_size, 1))

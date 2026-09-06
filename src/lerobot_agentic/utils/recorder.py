@@ -1,9 +1,9 @@
-import os
 import pathlib
-from typing import List, Optional
-import numpy as np
+
 import cv2
 import imageio
+import numpy as np
+
 
 class EpisodeVideoRecorder:
     """
@@ -14,14 +14,14 @@ class EpisodeVideoRecorder:
         self.output_dir = pathlib.Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.fps = fps
-        self.frames: List[np.ndarray] = []
+        self.frames: list[np.ndarray] = []
 
     def add_frame(
         self,
         rgb_image: np.ndarray,
-        sub_goal: Optional[str] = None,
-        target_box_2d: Optional[List[int]] = None,
-        step_idx: Optional[int] = None
+        sub_goal: str | None = None,
+        target_box_2d: list[int] | None = None,
+        step_idx: int | None = None
     ):
         frame = rgb_image.copy()
         h, w, _ = frame.shape

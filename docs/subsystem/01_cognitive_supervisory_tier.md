@@ -30,7 +30,7 @@ The Cognitive Supervisory Tier decouples these competencies:
 |                       ┌─────────────────────────────────────┐                                   |
 |                       │ Gemini Robotics ER Engine           │                                   |
 |                       │ (gemini-robotics-er-2-preview)      │                                   |
-|                       │ Fallback: gemini-2.5-flash / OpenCV │                                   |
+|                       │ Fixed Model; Deterministic Retries  │                                   |
 |                       └──────────────────┬──────────────────┘                                   |
 |                                          ▼                                                      |
 |                       ┌─────────────────────────────────────┐                                   |
@@ -62,8 +62,10 @@ The primary engine leverages Google's frontier Embodied Reasoning model (`gemini
 - **Inference Mode**: Direct structured JSON generation via `google-genai` SDK with strict Pydantic schema enforcement.
 - **Latency Profile**: $\sim 450\text{--}800\,\text{ms}$ per round-trip query.
 
-### 2.2 Secondary Fallback: `gemini-2.5-flash`
-When rate limits, transient network partitions, or model deprecation occur, the supervisor immediately falls back to `gemini-2.5-flash`. Using native structured outputs (`response_mime_type="application/json"` with `response_schema`), it reproduces the spatial plan with minimal reasoning degradation.
+### 2.2 Fixed Supervisory Protocol & Deterministic Retry
+To maintain scientific experimental rigor (preventing silent mutation of the independent variable), the system strictly fixes the cognitive model to `gemini-robotics-er-2-preview` across Systems C and D.
+- **Predetermined Retry Policy:** Transient network or rate limit errors trigger an immediate exponential backoff retry (up to 2 retries with interval $0.5 \times 2^{\text{attempt}}$ seconds).
+- **Episode Invalidation Protocol:** If the cloud API remains unreachable after exhausted retries, the system raises an explicit `SupervisorAPIError`, logging the episode seed for invalidation and scheduled re-execution. Silently falling back to a different language model during benchmark rollouts is prohibited.
 
 ### 2.3 Local Heuristic & OpenCV Fallback
 If `GEMINI_API_KEY` is completely omitted from the environment, the supervisory tier falls back to a deterministic local perception pipeline:

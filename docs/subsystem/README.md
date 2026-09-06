@@ -8,7 +8,7 @@ This directory provides comprehensive, deep-dive architectural specifications fo
 
 | Subsystem | Document | Operating Cadence | Primary Technology | Core Function |
 | :---: | :--- | :---: | :--- | :--- |
-| **01** | [**Cognitive Supervisory Tier**](./01_cognitive_supervisory_tier.md) | 1–2 Hz | Google `gemini-robotics-er-2-preview`, `gemini-2.5-flash`, Pydantic | Semantic task decomposition, 2D normalized bounding box regression $[0, 1000]$, visual anomaly detection, closed-loop replanning. |
+| **01** | [**Cognitive Supervisory Tier**](./01_cognitive_supervisory_tier.md) | ~0.5–2 Hz Async | Google `gemini-robotics-er-2-preview`, Pydantic | Semantic task decomposition, 2D normalized bounding box regression $[0, 1000]$, visual anomaly detection, closed-loop replanning. |
 | **02** | [**Visuomotor Policy Tier**](./02_visuomotor_policy_tier.md) | 50 Hz | Hugging Face LeRobot (`ACTPolicy`, `SmolVLA-450M`, Diffusion) | Action chunking ($K = 50$, 1.0 s horizon), CVAE transformer architecture, dual-camera fusion, EMA temporal ensembling, quintic minimum-jerk trajectory fallback. |
 | **03** | [**Physics Simulation Tier**](./03_physics_simulation_tier.md) | 500 Hz / 50 Hz | DeepMind MuJoCo 3.x, EGL Headless GPU rendering | 6-DoF arm + parallel gripper physics, contact dynamics, safe joint addressing (`jnt_qposadr`), overhead and wrist camera mount points. |
 | **04** | [**Dataset & Evaluation Tier**](./04_dataset_and_evaluation_tier.md) | Asynchronous / Batch | Hugging Face `LeRobotDataset` v2.0, Parquet, MP4, OpenCV HUD | Synthetic expert demonstration harvester ($\approx 500\,\text{FPS}$), automated benchmarks (GSR, PR, TTC, Jerk $\mathcal{J}$), telemetry HUD video recording. |

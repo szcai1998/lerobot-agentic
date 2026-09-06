@@ -29,6 +29,7 @@ ENV/
 # Weights & Checkpoints
 checkpoints/
 models/
+!src/**/models/
 *.pt
 *.pth
 *.bin

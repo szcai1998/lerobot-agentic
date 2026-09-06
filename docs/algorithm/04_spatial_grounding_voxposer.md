@@ -176,7 +176,7 @@ subject to joint limit constraints and actuator velocity bounds.
 
 ## 4. Google Gemini 2D-to-3D Metric Unprojection
 
-Google Gemini (`gemini-2.0-flash` / `gemini-robotics-er-2-preview`) returns zero-shot spatial bounding boxes in normalized image coordinates:
+Google Gemini (`gemini-robotics-er-2-preview`) returns zero-shot spatial bounding boxes in normalized image coordinates:
 
 $$\mathbf{b} = [y_{\min}, x_{\min}, y_{\max}, x_{\max}], \quad \text{where } y, x \in [0, 1000]$$
 
@@ -244,7 +244,7 @@ $$\begin{bmatrix} \mathbf{P}_B \\ 1 \end{bmatrix} = \mathbf{T}_B^C \begin{bmatri
 
 ## 5. Algorithmic Implementation: Unprojection & Affordance Trajectory
 
-Below is the standalone, production-verified unprojection and minimum-jerk affordance interpolation module:
+Below is the reference unprojection and minimum-jerk affordance interpolation module:
 
 ```python
 import numpy as np

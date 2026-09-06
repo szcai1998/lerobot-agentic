@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import sys
-import argparse
+import threading
 import time
 from pathlib import Path
 
 # Add src to pythonpath
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from lerobot_agentic.sim.env import MuJoCoRobotEnv
-from lerobot_agentic.policy.executor import VisuomotorPolicyExecutor
+from lerobot_agentic.cognitive.plan_state import AtomicPlanState
 from lerobot_agentic.cognitive.supervisor import CognitiveSupervisor
+from lerobot_agentic.policy.executor import VisuomotorPolicyExecutor
+from lerobot_agentic.sim.env import MuJoCoRobotEnv
 from lerobot_agentic.utils.recorder import EpisodeVideoRecorder
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Run LeRobot-Agentic closed-loop simulation rollout.")
+    parser = argparse.ArgumentParser(description="Run LeRobot-Agentic dual-rate closed-loop simulation rollout.")
     parser.add_argument("--goal", type=str, default="Grasp the red cube and lift it into the workspace",
                         help="Natural language task prompt for Cognitive Supervisor")
     parser.add_argument("--steps", type=int, default=150, help="Total 50Hz simulation steps (150 = 3.0s)")
@@ -24,7 +27,7 @@ def main():
     args = parser.parse_args()
 
     print("================================================================================")
-    print("🤖 LeRobot-Agentic: Embodied Manipulation Rollout Engine")
+    print("🤖 LeRobot-Agentic: Embodied Manipulation Rollout Engine (Dual-Rate Asynchronous)")
     print(f"Goal: '{args.goal}'")
     print(f"Horizon: {args.steps} steps @ 50 Hz (~{args.steps * 0.02:.1f}s physical time)")
     print("================================================================================")
@@ -32,10 +35,10 @@ def main():
     env = MuJoCoRobotEnv()
     obs = env.reset()
     policy = VisuomotorPolicyExecutor(pretrained_policy_path=args.policy_path)
-    
     recorder = EpisodeVideoRecorder(output_dir="outputs/videos")
+    plan_state = AtomicPlanState()
 
-    supervisor = None
+    # Resolve GEMINI_API_KEY
     if not os.environ.get("GEMINI_API_KEY"):
         env_file = Path(__file__).parent.parent / ".env"
         if env_file.exists():
@@ -48,62 +51,103 @@ def main():
                         os.environ["GEMINI_API_KEY"] = line.split("=", 1)[1].strip().strip("\"").strip("\x27")
                         break
 
-    if os.environ.get("GEMINI_API_KEY"):
-        print("[Supervisor] Connected via GEMINI_API_KEY. Using Gemini Robotics ER.")
+    stop_event = threading.Event()
+    latest_frame = [obs["rgb"]]
+    frame_lock = threading.Lock()
+
+    # -------------------------------------------------------------------------
+    # Asynchronous Cognitive Supervisor Thread (~0.5 - 2 Hz)
+    # -------------------------------------------------------------------------
+    def supervisor_worker():
+        if not os.environ.get("GEMINI_API_KEY"):
+            return
         try:
             supervisor = CognitiveSupervisor()
-        except Exception as e:
-            print(f"[Supervisor] Init warning: {e}. Falling back to autonomous heuristic.")
+        except Exception as e:  # noqa: BLE001
+            print(f"[Supervisor] Init warning: {e}")
+            return
+
+        while not stop_event.is_set():
+            with frame_lock:
+                frame_to_analyze = latest_frame[0].copy()
+
+            try:
+                plan = supervisor.plan_and_ground(frame_to_analyze, args.goal)
+                plan_state.update(plan)
+                print(f"[Supervisor Async] Grounding -> Sub-Goal: '{plan.sub_goal}' | Box: {plan.target_box_2d} | Replan: {plan.requires_replanning}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[Supervisor Async Error] {e}")
+
+            time.sleep(0.5)  # Target ~2 Hz cadence, measured empirically
+
+    if os.environ.get("GEMINI_API_KEY"):
+        print("[Supervisor] Connected via GEMINI_API_KEY. Launching asynchronous supervisory thread.")
+        supervisor_thread = threading.Thread(target=supervisor_worker, daemon=True)
+        supervisor_thread.start()
     else:
-        print("[Supervisor] GEMINI_API_KEY not set. Running autonomous affordance tracking.")
+        print("[Supervisor] GEMINI_API_KEY not set. Running autonomous heuristic tracking.")
 
     sim_step = 0
     current_chunk = None
     chunk_idx = 0
-    active_plan = None
+    last_plan_version = 0
 
     start_time = time.time()
-    
-    while sim_step < args.steps:
-        rgb_frame = obs["rgb"]
-        proprio = obs["proprioception"]
 
-        # Run cognitive supervisor every 50 steps (1 Hz) or at start
-        if sim_step % 50 == 0:
-            if supervisor is not None:
-                try:
-                    active_plan = supervisor.plan_and_ground(rgb_frame, args.goal)
-                    print(f"[{sim_step * 0.02:4.2f}s] Gemini Grounding -> Sub-Goal: '{active_plan.sub_goal}' | Box: {active_plan.target_box_2d}")
-                    if active_plan.should_halt:
-                        print("[Safety] Anomaly detected by supervisor. Halting.")
-                        break
-                except Exception as e:
-                    print(f"[{sim_step * 0.02:4.2f}s] Supervisor error: {e}")
-            else:
-                # Default pseudo-grounding for target cube
-                active_plan_sub_goal = "reach_cube" if sim_step < 75 else "grasp_and_lift"
-                active_box = [450, 480, 550, 560]  # Centered bounding box in normalized space
+    try:
+        while sim_step < args.steps:
+            rgb_frame = obs["rgb"]
+            rgb_wrist = obs.get("rgb_wrist")
+            proprio = obs["proprioception"]
 
-        # Retrieve action chunk (50 steps per chunk = 1s horizon)
-        if current_chunk is None or chunk_idx >= len(current_chunk):
-            goal_box = active_plan.target_box_2d if (active_plan and active_plan.target_box_2d) else [450, 480, 550, 560]
-            sub_goal_label = active_plan.sub_goal if active_plan else ("reach" if sim_step < 75 else "lift")
-            current_chunk = policy.predict_action_chunk(rgb_frame, proprio, goal_box=goal_box, sub_goal=sub_goal_label)
-            chunk_idx = 0
+            # Update shared frame for async supervisor
+            with frame_lock:
+                latest_frame[0] = rgb_frame
 
-        target_action = current_chunk[chunk_idx]
-        chunk_idx += 1
+            # Read latest plan without blocking 50 Hz execution loop
+            active_plan, _target_3d, _dest_3d, _subgoal_idx, plan_ver = plan_state.get_snapshot()
 
-        # Step physics in MuJoCo
-        obs, reward, terminated, info = env.step(target_action)
-        
-        # Record video frame with HUD
-        if args.video or args.gif:
-            current_sub_goal = active_plan.sub_goal if active_plan else ("reach" if sim_step < 75 else "lift")
-            box_to_draw = active_plan.target_box_2d if active_plan else [450, 480, 550, 560]
-            recorder.add_frame(rgb_frame, sub_goal=current_sub_goal, target_box_2d=box_to_draw, step_idx=sim_step)
+            # Dynamic closed-loop recovery: reset policy queue if replanning requested
+            if active_plan is not None and plan_ver > last_plan_version:
+                last_plan_version = plan_ver
+                if active_plan.requires_replanning:
+                    print(f"[{sim_step * 0.02:4.2f}s] 🔄 [Recovery] Anomaly detected! Resetting LeRobot action queue & replanning...")
+                    policy.reset()
+                    current_chunk = None
 
-        sim_step += 1
+                if active_plan.should_halt:
+                    print("[Safety] Anomaly detected by supervisor. Halting.")
+                    break
+
+            # Retrieve action chunk (50 steps per chunk = 1s horizon)
+            if current_chunk is None or chunk_idx >= len(current_chunk):
+                goal_box = active_plan.target_box_2d if (active_plan and active_plan.target_box_2d) else [450, 480, 550, 560]
+                sub_goal_label = active_plan.sub_goal if active_plan else ("reach" if sim_step < 75 else "lift")
+                current_chunk = policy.predict_action_chunk(
+                    rgb_frame,
+                    proprio,
+                    goal_box=goal_box,
+                    sub_goal=sub_goal_label,
+                    rgb_wrist=rgb_wrist
+                )
+                chunk_idx = 0
+
+            target_action = current_chunk[chunk_idx]
+            chunk_idx += 1
+
+            # Step physics in MuJoCo at 50 Hz
+            obs, _reward, _terminated, info = env.step(target_action)
+
+            # Record video frame with HUD
+            if args.video or args.gif:
+                current_sub_goal = active_plan.sub_goal if active_plan else ("reach" if sim_step < 75 else "lift")
+                box_to_draw = active_plan.target_box_2d if active_plan else [450, 480, 550, 560]
+                recorder.add_frame(rgb_frame, sub_goal=current_sub_goal, target_box_2d=box_to_draw, step_idx=sim_step)
+
+            sim_step += 1
+
+    finally:
+        stop_event.set()
 
     elapsed = time.time() - start_time
     fps = sim_step / max(elapsed, 1e-4)
@@ -114,6 +158,7 @@ def main():
         recorder.save("rollout.mp4")
     if args.gif:
         recorder.save("rollout.gif")
+
 
 if __name__ == "__main__":
     main()

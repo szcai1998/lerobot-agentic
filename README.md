@@ -29,13 +29,13 @@ The architecture decouples high-level semantic reasoning from high-frequency joi
 
 ```text
 +-------------------------------------------------------------------------------+
-|                    1. COGNITIVE SUPERVISORY TIER (1–2 Hz)                     |
-|           Google gemini-robotics-er-2-preview / gemini-2.5-flash              |
+|                    1. COGNITIVE SUPERVISORY TIER (~0.5–2 Hz Async)            |
+|           Google gemini-robotics-er-2-preview (Fixed Model)                   |
 |                                                                               |
 |   • Multi-modal spatial perception & zero-shot 2D bounding boxes [0, 1000]   |
 |   • Natural language goal decomposition (Reach ➔ Grasp ➔ Lift ➔ Place)       |
 |   • Visual anomaly detection & closed-loop self-correction replanning         |
-|   • Autonomous zero-cloud OpenCV color/contour affordance fallback            |
+|   • Thread-safe AtomicPlanState shared memory (non-blocking 50 Hz loop)       |
 +---------------------------------------+---------------------------------------+
                                         | Semantic Sub-goals & Bounding Boxes
                                         v
@@ -64,12 +64,12 @@ The architecture decouples high-level semantic reasoning from high-frequency joi
 
 ## 💻 Hardware Suitability & Compute Topology
 
-| Compute Layer | Target Hardware | Verified Metric / Budget |
+| Compute Layer | Target Hardware | Planning Envelope / Feasibility Target |
 | :--- | :--- | :--- |
-| **Cognitive Tier** | Google AI Studio Managed API | Zero local VRAM, 1–2 Hz call rate |
+| **Cognitive Tier** | Google AI Studio Managed API | Zero local VRAM, ~0.5–2 Hz async target cadence |
 | **Physics Simulation** | NVIDIA GeForce RTX 3070 (8GB) | EGL Headless GPU rendering at **>400 FPS** |
-| **Motor Policy Inference** | NVIDIA GeForce RTX 3070 (8GB) | **~1.4 GB VRAM**, sub-20ms inference latency |
-| **Motor Policy Training** | NVIDIA GeForce RTX 3070 (8GB) | **~2.4 GB VRAM** (50k steps in ~45 min, AMP BF16) |
+| **Motor Policy Inference** | NVIDIA GeForce RTX 3070 (8GB) | **~1.2–1.4 GB VRAM**, sub-20ms inference latency |
+| **Motor Policy Training** | NVIDIA GeForce RTX 3070 (8GB) | **~3.5–5.5 GB VRAM** (Planning envelope; validate in Gate 0) |
 
 ---
 

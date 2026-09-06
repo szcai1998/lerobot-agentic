@@ -1,18 +1,19 @@
 import os
-import io
-from typing import Optional
-import numpy as np
+
 import cv2
+import numpy as np
 from google import genai
 from google.genai import types
+
 from lerobot_agentic.cognitive.schemas import SpatialGroundingPlan
+
 
 class CognitiveSupervisor:
     """
-    High-level reasoning brain using Google Gemini Robotics API (gemini-robotics-er-2-preview or gemini-2.0-flash).
-    Extracts spatial affordances, generates bounding boxes, and plans sub-goals at 1-2 Hz.
+    High-level reasoning brain using Google Gemini Robotics API (gemini-robotics-er-2-preview).
+    Extracts spatial affordances, generates bounding boxes, and plans sub-goals at target 0.5-2 Hz.
     """
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-robotics-er-2-preview"):
+    def __init__(self, api_key: str | None = None, model_name: str = "gemini-robotics-er-2-preview"):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if not self.api_key:
             # Check project root .env
@@ -31,7 +32,7 @@ class CognitiveSupervisor:
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_name = model_name
 
-    def plan_and_ground(self, rgb_image: np.ndarray, natural_language_goal: str) -> SpatialGroundingPlan:
+    def plan_and_ground(self, rgb_image: np.ndarray, natural_language_goal: str, max_retries: int = 2) -> SpatialGroundingPlan:
         if not self.client:
             raise RuntimeError("GEMINI_API_KEY is not set. Cannot run remote CognitiveSupervisor.")
 
@@ -51,32 +52,26 @@ class CognitiveSupervisor:
         Strictly adhere to the JSON schema.
         """
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                    prompt
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SpatialGroundingPlan,
-                    temperature=0.1
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                        prompt
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=SpatialGroundingPlan,
+                        temperature=0.1
+                    )
                 )
-            )
-            return SpatialGroundingPlan.model_validate_json(response.text)
-        except Exception as e:
-            # Fallback to gemini-2.5-flash
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                    prompt
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SpatialGroundingPlan,
-                    temperature=0.1
-                )
-            )
-            return SpatialGroundingPlan.model_validate_json(response.text)
+                return SpatialGroundingPlan.model_validate_json(response.text)
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if attempt < max_retries:
+                    import time
+                    time.sleep(0.5 * (2 ** attempt))
+
+        raise RuntimeError(f"CognitiveSupervisor API call failed on {self.model_name} after {max_retries} retries: {last_error}")

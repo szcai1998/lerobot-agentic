@@ -7,25 +7,16 @@
 * **Document Identifier:** `DOSSIER-01-AGENTIC-MANIPULATION`
 * **Target Domain:** Embodied AI, Hierarchical Robot Learning, Visuomotor Control, Imitation Learning (IL), Dual-Rate Supervisory Agents
 * **Author / Role:** Embodied AI & Robotics Lead Researcher / PDEng Scholar
-* **Primary Stack:** Hugging Face `lerobot` (`>=0.4.0`, standardizing on `LeRobotDataset v3.0`), DeepMind `mujoco >=3.12.0` (Headless EGL), PyTorch 2.4+, Google `gemini-robotics-er-2-preview` / `gemini-2.0-flash` APIs
+* **Primary Stack (Locked Specification):**
+  - **Python:** `3.12` (authoritative dependency resolution via committed `uv.lock`)
+  - **Robot Learning Framework:** Hugging Face `lerobot==0.6.1` (standardizing on `LeRobotDataset v3.0` and `PolicyProcessorPipeline`)
+  - **Physics Engine:** DeepMind `mujoco==3.12.0` (Headless Hardware-Accelerated EGL Rendering)
+  - **Deep Learning Framework:** PyTorch `2.6.0+cu124` / `torchvision==0.21.0`
+  - **Cognitive Vision-Language Tier:** Google `google-genai==1.5.0` targeting `gemini-robotics-er-2-preview` (fixed model; no silent fallbacks)
 * **Target Hardware Profile:** Edge/Local Workstation (NVIDIA GeForce RTX 3070 8GB VRAM, Ampere) + Cloud Cognitive Tier (Google Gemini Robotics ER Managed API)
 * **Central Research Question:**
-  > *"How much does agentic embodied reasoning and closed-loop failure recovery improve the robustness of learned visuomotor policies under task, geometric, and visual distribution shifts?"*
-
----
-
-### Project Evaluation & Strategic Alignment Scorecard
-
-A critical finding from industry robotics audits (FieldAI, Dyna Robotics, NVIDIA) is that merely connecting an LLM to a robot simulator is no longer research novelty. Real industrial and academic value comes from **rigorous system design, classical baselines, quantitative distribution-shift evaluation, and failure recovery**.
-
-| Evaluation Dimension | Initial Draft Design | Upgraded Research-Engineering Design | Impact Rationale |
-| :--- | :---: | :---: | :--- |
-| **Career Relevance** | 9.0 / 10 | **9.5 / 10** | Directly mirrors 2026 industry job specifications (kinematics, IL/VLA, MuJoCo, PyTorch, evaluation). |
-| **Engineering Depth** | 8.0 / 10 | **9.0 / 10** | Replaces toy heuristics with true SE(3) unprojection, MuJoCo Jacobian IK, and LeRobot action queuing. |
-| **Research Value** | 7.0 / 10 | **8.5 / 10** | Formulates a structured scientific benchmark: Classical vs. ACT vs. Hierarchical vs. Closed-Loop Recovery. |
-| **Scientific Novelty** | 5.5 / 10 | **7.5 / 10** | Focuses on closed-loop failure replanning and distribution shifts rather than claiming a novel VLA. |
-| **Exchange Feasibility** | 5.5 / 10 | **9.0 / 10** | Scopes down from 5 unfeasible foundation models to a rock-solid, achievable 4–6 week pipeline on an RTX 3070. |
-| **GitHub / Portfolio Impact** | 9.0 / 10 | **10.0 / 10** | Product-grade repo: benchmark CSVs, telemetry HUD videos, honest error bars, and reproducible checkpoints. |
+  > *"How much does agentic embodied reasoning and closed-loop failure recovery improve the robustness of learned visuomotor policies under geometric, visual, clutter, and physical disturbance shifts?"*
+  *(Note: Task-level semantic generalization across novel tool classes is intentionally scoped as follow-up research to maintain empirical rigor within the exchange project envelope).*
 
 ---
 
@@ -37,64 +28,79 @@ Robotic manipulation has transitioned from classical hand-crafted motion planner
 2. **Spatial Hallucination & Compounding Drift:** Open-loop VLM planning suffers when visual occlusions occur or when grasps slip mid-trajectory.
 
 The 2025–2026 frontier has stabilized around **Hierarchical Dual-Rate Embodied Orchestration**:
-* A **Slow Cognitive Supervisory Tier (1–2 Hz)** running multimodal reasoning (Google Gemini Robotics ER 2) for zero-shot spatial grounding, task decomposition, progress verification, and anomaly detection.
-* A **Fast Visuomotor Execution Tier (50 Hz)** running local policies (Hugging Face LeRobot ACT / Diffusion) for fluid, low-latency trajectory generation.
+* A **Slow Cognitive Supervisory Tier (target cadence approximately 0.5–2 Hz or event-triggered, measured empirically)** running multimodal physical reasoning (Google Gemini Robotics ER 2) for zero-shot 2D spatial grounding, task decomposition, progress verification, and anomaly detection.
+* A **Fast Visuomotor Execution Tier (50 Hz, $\Delta t = 20\,\text{ms}$)** running local policies (Hugging Face LeRobot ACT / Diffusion) for fluid, low-latency trajectory generation.
 
 ```
-+-------------------------------------------------------------------------------+
-|                    1. COGNITIVE SUPERVISORY TIER (Cloud API)                  |
-|                   Google gemini-robotics-er-2-preview (1 - 2 Hz)              |
-|   - Zero-shot spatial grounding & bounding box detection [ymin, xmin, ymax, xmax]|
-|   - Task decomposition: "Pick red cube, place in target receptacle"           |
-|   - Online progress assessment: success verification vs. grasp slippage       |
-|   - Autonomous anomaly recovery: triggers replanning when disturbances occur  |
-+---------------------------------------+---------------------------------------+
-                                        | Subgoals, Affordances & Replans
-                                        v
-+-------------------------------------------------------------------------------+
-|                    2. VISUOMOTOR EXECUTION TIER (Local RTX 3070)              |
-|                       Hugging Face LeRobot Policy Engine (50 Hz)              |
-|                                                                               |
-|   +------------------------------------+   +------------------------------+   |
-|   |   ACT Policy (CVAE Transformer)    |   |  Classical Baseline (IK/PD)  |   |
-|   |   - Dual ResNet18 (Top + Wrist)    |   |  - Analytical Unprojection   |   |
-|   |   - Internal Action Queue (K=50)   |   |  - MuJoCo Jacobian DLS IK    |   |
-|   +-----------------+------------------+   +--------------+---------------+   |
-|                     |                                     |                   |
-|                     +------------------+------------------+                   |
-|                                        | Joint Position Targets q* (50 Hz)    |
-|                                        v                                      |
-+-------------------------------------------------------------------------------+
-                                        | Actuator Commands
-                                        v
-+-------------------------------------------------------------------------------+
-|                 3. PHYSICS SIMULATION TIER (DeepMind MuJoCo 3.12+)            |
-|   - Rigid-body dynamics & contact solver running at 500 Hz (dt=0.002s)        |
-|   - Dual Camera Streams: Static Overhead (Top) + In-Hand Tool View (Wrist)    |
-|   - Headless Hardware-Accelerated EGL Rendering                               |
-|   - Perturbation & Distribution Shift Injection Engine                        |
-+-------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------------------+
+|                        1. COGNITIVE SUPERVISORY THREAD (Cloud API, Async)                         |
+|                             Google gemini-robotics-er-2-preview                                  |
+|   - Target Cadence: ~0.5 - 2 Hz / Event-Triggered (Empirically Measured, Cloud Decoupled)        |
+|   - Zero-shot 2D spatial grounding & affordance boxes [ymin, xmin, ymax, xmax] in [0, 1000]       |
+|   - Multi-step task decomposition: "reach_cube", "grasp_cube", "lift_cube", "transport_to_zone"  |
+|   - Online progress assessment: success verification vs. grasp slippage / displacement            |
+|   - Anomaly recovery: triggers atomic plan update + low-level policy queue reset                  |
++-------------------------------------------------+-------------------------------------------------+
+                                                  | Updates Shared State (Non-Blocking)
+                                                  v
++---------------------------------------------------------------------------------------------------+
+|                              ATOMIC PLAN STATE (Thread-Safe Shared Memory)                        |
+|   - Active Subgoal ID (One-Hot)                                                                   |
+|   - Target 3D Point (Unprojected via Calibrated Depth)                                            |
+|   - Destination 3D Point (Unprojected via Calibrated Depth)                                       |
+|   - Replanning / Recovery Flag (Versioned Stamp)                                                 |
++-------------------------------------------------+-------------------------------------------------+
+                                                  | Reads Latest Plan (Zero Network Wait)
+                                                  v
++---------------------------------------------------------------------------------------------------+
+|                        2. VISUOMOTOR EXECUTION THREAD (Deterministic 50 Hz, Local)                |
+|                                Hugging Face LeRobot Policy Engine                                 |
+|                                                                                                   |
+|   +------------------------------------+   +--------------------------------------------------+   |
+|   |  Goal-Conditioned ACT Policy       |   |  Classical Baseline (System A: RGB-D + IK)       |   |
+|   |  - Dual ResNet18 (Top + Wrist)     |   |  - Calibrated Camera Ray Unprojection            |   |
+|   |  - Proprioception (7-DoF)          |   |  - Color/Mask Segmentation                       |   |
+|   |  - Goal Conditioning Vector g_t    |   |  - MuJoCo 6-DoF Jacobian DLS IK + PD             |   |
+|   |  - PolicyProcessorPipeline         |   |                                                  |   |
+|   |  - Action Queue Reset on Replan    |   |  [Oracle Baseline: Simulator State -> DLS IK]    |   |
+|   +-----------------+------------------+   +------------------------+-------------------------+   |
+|                     |                                               |                             |
+|                     +-----------------------+-----------------------+                             |
+|                                             | Joint Position Targets q* (50 Hz)                   |
+|                                             v                                                     |
++---------------------------------------------------------------------------------------------------+
+                                              | Actuator Commands (Position Servos)
+                                              v
++---------------------------------------------------------------------------------------------------+
+|                        3. PHYSICS SIMULATION TIER (DeepMind MuJoCo 3.12+)                         |
+|   - Articulated 6-DoF Robotic Arm + Parallel Jaw Gripper (7 Actuators)                            |
+|   - Rigid-body dynamics & contact solver running at 500 Hz (dt=0.002s, 10 substeps per step)      |
+|   - Dual Synchronized Cameras: Static Overhead (Top) + In-Hand Wrist (Attached to End-Effector)   |
+|   - Calibrated Pinhole Optics (Field of View fovy, Dynamic Intrinsics K, Extrinsics T_world_cam)  |
+|   - Headless Hardware-Accelerated EGL Rendering (Zero X11 / Display Server Overhead)              |
+|   - Perturbation & Distribution Shift Injection Engine                                            |
++---------------------------------------------------------------------------------------------------+
 ```
 
 ### 1.2 The Role of Key Technologies
 
-#### Why Hugging Face `lerobot`?
+#### Why Hugging Face `lerobot` (v0.6+)?
 LeRobot has established itself as the modern standard across robotics learning:
-* **Hardware-Agnostic Paradigm:** A clean pipeline covering `Teleoperate -> Record -> Train -> Deploy`.
+* **Hardware-Agnostic Paradigm:** A modular pipeline covering `Teleoperate -> Record -> Train -> Deploy`.
 * **Standardized Dataset Schema (`LeRobotDataset v3.0`):** Streaming Parquet metadata, timestamped action/state tensors, and chunked MP4 video streams.
-* **Production-Grade Implementations:** Standardized, robust implementations of Action Chunking with Transformers (ACT) and Diffusion Policy with native `safetensors` and `accelerate` support.
-* **Simulation-to-Policy Workflows:** Native utilities to collect synthetic demonstrations from MuJoCo environments directly into `LeRobotDataset` format.
+* **Separation of Policy and Normalization (`PolicyProcessorPipeline`):** In LeRobot 0.6+, normalization statistics are moved outside policy weights into explicit preprocessor and postprocessor pipelines (`policy_preprocessor.json` and `policy_postprocessor.json`). This eliminates silent normalization mismatches between training and evaluation.
+* **Production-Grade Implementations:** Standardized implementations of Action Chunking with Transformers (ACT) and Diffusion Policy with native `safetensors` and `accelerate` support.
 
 #### Why DeepMind `mujoco`?
 * **Physics Precision:** SOTA contact dynamics, dry friction, and constraint stabilization without the heavy simulation overhead of Omniverse/Isaac Sim.
-* **Research Reproducibility:** Minimal dependency tree, ultra-fast headless CPU/EGL rendering, and cross-platform determinism make it the gold standard for robotic learning benchmarks.
-* **Industry Alignment:** Leading robotics labs (FieldAI, Dyna Robotics, NVIDIA) explicitly accept and utilize MuJoCo for manipulation policy verification.
+* **Research Reproducibility:** Minimal dependency tree, fast headless CPU/EGL rendering, and cross-platform determinism make it the standard for robotic learning benchmarks.
+* **Authentic Kinematic Chains:** Supports full multi-link articulated manipulators, position actuators, and calibrated camera sensors.
 
 #### Why Gemini Robotics ER 2?
-Google's Gemini Robotics ER 2 is purpose-built for physical reasoning:
-* Native metric pointing and normalized 2D/3D bounding boxes.
-* Structured Pydantic schema generation with guaranteed format adherence.
-* Multi-step task decomposition and explicit progress tracking, enabling closed-loop failure recovery rather than blind open-loop execution.
+Google's Gemini Robotics ER 2 (`gemini-robotics-er-2-preview`) is purpose-built for physical reasoning:
+* **2D Spatial Grounding:** Emits normalized `[y, x]` 2D points, normalized 2D bounding boxes `[ymin, xmin, ymax, xmax]`, and temporal video object tracking. These 2D groundings are converted to metric 3D coordinates via calibrated depth map unprojection.
+* **Structured Semantic Schemas:** Emits schema-constrained Pydantic outputs paired with application-level semantic validation (bounds checking, coordinate sanity, and workspace bounding).
+* **Multi-Step Task Decomposition:** Decomposes complex natural language goals into sequential subgoals with explicit progress tracking, enabling closed-loop anomaly detection and dynamic replanning.
 
 ---
 
@@ -104,14 +110,15 @@ To guarantee high engineering depth and prevent the scope creep typical of short
 
 | Priority Tier | Component / Objective | Compute Target | Exchange Status |
 | :--- | :--- | :--- | :---: |
-| **MUST** | MuJoCo 6-DoF robotic manipulation arena with dual cameras (`top` + `wrist`) | CPU / EGL | **Core Gate 1** |
-| **MUST** | Classical baseline: Analytical 3D Unprojection + MuJoCo Jacobian DLS IK + PD | CPU | **Core Gate 1** |
-| **MUST** | Automated demonstration harvester collecting 50 episodes in `LeRobotDataset` format | RTX 3070 | **Core Gate 2** |
-| **MUST** | ACT training pipeline (dual ResNet18 + CVAE Transformer) | RTX 3070 (8GB) | **Core Gate 3** |
-| **MUST** | Gemini Robotics ER cognitive supervisor with structured spatial grounding | Cloud API | **Core Gate 4** |
-| **MUST** | 4-system quantitative benchmark across 5 distribution shifts | RTX 3070 | **Core Gate 5** |
-| **MUST** | Product-grade GitHub repository with telemetry HUD videos and benchmark tables | Clean Docs | **Core Gate 5** |
-| **SHOULD** | Online closed-loop disturbance detection and autonomous replanning | Cloud + 3070 | **High-Value Polish** |
+| **MUST** | Reproducible environment validation via `uv.lock` & hardware sanity test | RTX 3070 | **Gate 0** |
+| **MUST** | MuJoCo 6-DoF robotic manipulation arena with dual cameras (`overhead_cam` + in-hand `wrist_cam`) | CPU / EGL | **Gate 1** |
+| **MUST** | Kinematic Baselines: Oracle (ground-truth state $\to$ IK) and System A (RGB-D unprojection $\to$ IK) | CPU | **Gate 1** |
+| **MUST** | Automated demonstration harvester collecting 50 episodes in `LeRobotDataset v3.0` format | RTX 3070 | **Gate 2** |
+| **MUST** | ACT training pipeline (dual ResNet18 + CVAE Transformer + `PolicyProcessorPipeline`) | RTX 3070 (8GB) | **Gate 3** |
+| **MUST** | Gemini Robotics ER asynchronous supervisor with structured spatial grounding | Cloud API | **Gate 4** |
+| **MUST** | 5-system quantitative benchmark (Oracle, A, B, C, D) across 5 distribution shifts ($N=20$ paired seeds) | RTX 3070 | **Gate 5** |
+| **MUST** | Product-grade GitHub repository with telemetry HUD videos, manifest logs, and Wilson CIs | Clean Docs | **Gate 5** |
+| **SHOULD** | Online closed-loop disturbance detection and autonomous queue-reset replanning | Cloud + 3070 | **High-Value Polish** |
 | **STRETCH** | SmolVLA (450M) evaluation and inference comparison | RTX 3070 | Optional Upside |
 | **FUTURE** | Physical arm deployment (SO-101 / LeKiwi), ROS2 bridge, $\pi_0$ / OpenVLA LoRA | Cluster / Hardware | Post-Exchange |
 
@@ -145,63 +152,111 @@ To guarantee high engineering depth and prevent the scope creep typical of short
 
 ### 3.2 Deep Mathematical Formulations
 
-#### A. Action Chunking with CVAE (ACT)
+#### A. Action Chunking with CVAE (ACT) & Goal Conditioning Interface
 Traditional Behavioral Cloning minimizes forward KL divergence:
 $$\min_\theta \mathbb{E}_{(s_t, a_t) \sim \mathcal{D}} \left[ -\log \pi_\theta(a_t \mid s_t) \right]$$
 Single-step autoregression accumulates drift $\mathcal{O}(T^2)$. ACT predicts continuous action chunks $\mathbf{A}_t = [a_t, a_{t+1}, \dots, a_{t+K-1}] \in \mathbb{R}^{K \times d_a}$.
 
-A Conditional VAE with encoder $q_\phi(z \mid \mathbf{A}_t, s_t)$ and decoder $\pi_\theta(s_t, z)$ handles demonstration multimodality:
-$$\mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{z \sim q_\phi(z \mid \mathbf{A}_t, s_t)} \left[ \sum_{k=0}^{K-1} \| a_{t+k} - \pi_\theta(s_t, z)_k \|_1 \right] + \beta D_{\text{KL}}\left( q_\phi(z \mid \mathbf{A}_t, s_t) \,\parallel\, p(z) \right)$$
-Where $p(z) = \mathcal{N}(0, \mathbf{I})$. At inference, the latent variable is set to mean $z = 0$.
+A Conditional VAE with encoder $q_\phi(z \mid \mathbf{A}_t, s_t, g_t)$ and decoder $\pi_\theta(s_t, g_t, z)$ handles demonstration multimodality:
+$$\mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{z \sim q_\phi(z \mid \mathbf{A}_t, s_t, g_t)} \left[ \sum_{k=0}^{K-1} \| a_{t+k} - \pi_\theta(s_t, g_t, z)_k \|_1 \right] + \beta D_{\text{KL}}\left( q_\phi(z \mid \mathbf{A}_t, s_t, g_t) \,\parallel\, p(z) \right)$$
+where $p(z) = \mathcal{N}(0, \mathbf{I})$. At inference, the latent variable is fixed to the mean $z = 0$.
 
-**Temporal Ensembling:** Overlapping chunks predicted at successive timesteps are combined via exponential decay:
-$$a_t = \frac{\sum_{i=0}^{\min(t, K-1)} w_i \cdot \mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t, K-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
-*(Note: In Hugging Face LeRobot, `policy.select_action(obs)` handles this queue management internally).*
+##### Explicit Goal Conditioning Vector $\mathbf{g}_t$ (System C & D)
+To mathematically distinguish System B (pure observation-conditioned ACT) from System C/D (agentic goal-conditioned ACT), the policy receives an explicit goal vector:
+$$\mathbf{g}_t = \begin{bmatrix} \mathbf{p}_{\text{target}}^{3D} \\ \mathbf{p}_{\text{dest}}^{3D} \\ \mathbf{e}_{\text{subgoal}} \end{bmatrix} \in \mathbb{R}^{11}$$
+* $\mathbf{p}_{\text{target}}^{3D} \in \mathbb{R}^3$: Cartesian coordinates of the active manipuland target, unprojected from Gemini 2D bounding boxes using calibrated depth.
+* $\mathbf{p}_{\text{dest}}^{3D} \in \mathbb{R}^3$: Cartesian coordinates of the target drop receptacle.
+* $\mathbf{e}_{\text{subgoal}} \in \{0, 1\}^5$: One-hot indicator of the active phase (`reach`, `grasp`, `lift`, `transport`, `recover`).
 
-#### B. Classical Perception & Kinematics Baseline (Rigorous Geometry)
-To evaluate learned models honestly, we implement a mathematically grounded classical controller:
+```
+Gemini Robotics ER 2
+        │
+        ├── target_point_3d
+        ├── destination_point_3d
+        └── subgoal_id
+        │
+        ▼
+Goal Conditioning Vector (g_t in R^11)
+        │
+        ┌─────────┴──────────┐
+        │                    │
+  observations              goal
+  top RGB + wrist RGB    target xyz (3)
+  proprioception (7)     destination xyz (3)
+                         subgoal one-hot (5)
+        │                    │
+        └──────────┬─────────┘
+                   ▼
+               ACT Policy
+```
 
-1. **2D-to-3D Camera Unprojection:**
-   Given bounding box center $(u_c, v_c)$ in pixels, camera intrinsics $\mathbf{K}$, and depth $D(u_c, v_c)$:
-   $$\mathbf{P}_C = D(u_c, v_c) \cdot \mathbf{K}^{-1} \begin{bmatrix} u_c \\ v_c \\ 1 \end{bmatrix}, \quad \text{where } \mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$$
+> **Critical Training Requirement:** The synthetic demonstrations collected for training System C and D MUST record and contain this identical goal representation $\mathbf{g}_t$ alongside the image and proprioception streams. Goal conditioning cannot be retrofitted solely at inference time.
 
-2. **Rigid-Body Transformation to Robot Frame:**
-   $$\mathbf{P}_B = \mathbf{T}_B^C \begin{bmatrix} \mathbf{P}_C \\ 1 \end{bmatrix} = \begin{bmatrix} \mathbf{R}_B^C & \mathbf{t}_B^C \\ \mathbf{0}^T & 1 \end{bmatrix} \begin{bmatrix} \mathbf{P}_C \\ 1 \end{bmatrix}$$
+##### LeRobot Action Queuing and Recovery Queue Reset
+In Hugging Face LeRobot, `policy.select_action(batch)` maintains an internal FIFO action queue or temporal ensembling buffer of size $K=50$. It pops single-step actions for high-frequency execution and triggers a forward chunk pass only when the queue empties.
+* **Failure Concurrency Hazard:** If an anomaly or external disturbance occurs at step $t$, the internal queue still holds stale actions planned under the pre-disturbance state.
+* **Semantic Recovery Protocol:** When the cognitive supervisor detects failure or triggers replanning, the system must explicitly invoke:
+```python
+policy.reset()
+```
+This flushes all cached pre-disturbance action vectors from LeRobot's internal buffer, forcing an immediate forward pass conditioned on the new observation and updated goal vector $\mathbf{g}_{t}$.
 
-3. **Differential Inverse Kinematics (Damped Least Squares / Levenberg-Marquardt):**
-   Given end-effector Cartesian error $\mathbf{e} = \mathbf{x}_{\text{target}} - \mathbf{x}_{\text{current}} \in \mathbb{R}^3$, the joint velocity $\Delta \mathbf{q}$ is computed via the translation Jacobian $\mathbf{J}_p(\mathbf{q}) \in \mathbb{R}^{3 \times n}$:
-   $$\Delta \mathbf{q} = \mathbf{J}_p^T \left( \mathbf{J}_p \mathbf{J}_p^T + \lambda^2 \mathbf{I} \right)^{-1} \mathbf{e}$$
-   where $\lambda$ is a damping factor preventing velocity explosions near kinematic singularities.
+##### LeRobot 0.6+ PolicyProcessorPipeline Architecture
+Following LeRobot 0.6+ standards, normalization must not be hardcoded as ad-hoc division (`/ 255.0`). The system strictly routes data through the standardized pipeline:
+$$\text{Raw MuJoCo Obs} \xrightarrow{} \text{Env Processor} \xrightarrow{} \text{Policy Preprocessor} \xrightarrow{} \text{ACT } \texttt{select\_action()} \xrightarrow{} \text{Policy Postprocessor} \xrightarrow{} \text{Actuator Cmd}$$
 
-4. **Low-Level PD Control:**
-   Joint targets are tracked using proportional-derivative torque control:
-   $$\boldsymbol{\tau} = \mathbf{K}_p (\mathbf{q}^* - \mathbf{q}) - \mathbf{K}_d \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q})$$
+#### B. Classical Perception & Kinematics Baselines (Rigorous Geometry)
+
+##### 1. Dynamic Camera Calibration & 2D-to-3D Metric Unprojection
+Rather than hardcoding arbitrary focal lengths or table offsets, camera intrinsics $\mathbf{K}$ are derived dynamically from the MuJoCo model's vertical field of view ($\texttt{fovy}$) and pixel buffer dimensions ($W, H$):
+$$f_y = \frac{H}{2 \tan(\text{fovy} / 2)}, \quad f_x = \frac{W}{2 \tan(\text{fovx} / 2)} = f_y \quad (\text{square pixels})$$
+$$c_x = \frac{W}{2}, \quad c_y = \frac{H}{2}, \quad \mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$$
+
+Given 2D pixel coordinate $(u_c, v_c)$ and sampled depth $D(u_c, v_c)$:
+* If $D(u_c, v_c) \le 0.01\,\text{m}$ or exceeds sensor clipping limits, the routine raises an explicit `INVALID_DEPTH` exception. Fabricating heuristic default depth values (e.g., $0.6\,\text{m}$) is strictly prohibited in formal benchmarks.
+* Optical ray in camera coordinates:
+  $$\mathbf{P}_C = D(u_c, v_c) \cdot \mathbf{K}^{-1} \begin{bmatrix} u_c \\ v_c \\ 1 \end{bmatrix}$$
+* World frame transformation using MuJoCo camera extrinsics ($\mathbf{t}_{WC} = \texttt{data.cam\_xpos[cam\_id]}$, $\mathbf{R}_{WC} = \texttt{data.cam\_xmat[cam\_id]}$):
+  $$\mathbf{P}_W = \mathbf{t}_{WC} + \mathbf{R}_{WC} \mathbf{P}_C$$
+
+##### 2. Differential Inverse Kinematics (Damped Least Squares / Levenberg-Marquardt)
+Given end-effector Cartesian position error $\mathbf{e} = \mathbf{x}_{\text{target}} - \mathbf{x}_{\text{current}} \in \mathbb{R}^3$, the joint velocity correction $\Delta \mathbf{q} \in \mathbb{R}^6$ is computed using the end-effector site translation Jacobian $\mathbf{J}_{\text{arm}}(\mathbf{q}) \in \mathbb{R}^{3 \times 6}$:
+$$\Delta \mathbf{q} = \mathbf{J}_{\text{arm}}^T \left( \mathbf{J}_{\text{arm}} \mathbf{J}_{\text{arm}}^T + \lambda^2 \mathbf{I} \right)^{-1} \mathbf{e}$$
+where $\lambda = 0.05$ is a damping coefficient preventing numerical singularity divergence.
+
+##### 3. Low-Level Position Servo Control
+Joint targets $\mathbf{q}^* = \mathbf{q} + \text{clip}(\Delta \mathbf{q}, -\Delta \mathbf{q}_{\max}, \Delta \mathbf{q}_{\max})$ are tracked via MuJoCo position actuators:
+$$\boldsymbol{\tau} = \mathbf{K}_p (\mathbf{q}^* - \mathbf{q}) - \mathbf{K}_d \dot{\mathbf{q}}$$
 
 ---
 
 ## 4. Hardware Feasibility & Realistic VRAM Budgets
 
-### 4.1 Empirical GPU Training & Inference Envelopes (2026 Standards)
+### 4.1 Planning Envelopes on RTX 3070 (8GB VRAM)
 
-Many initial project proposals fail due to unrealistic GPU memory expectations. Below is the verified hardware matrix for consumer and workstation setups:
+Consumer GPU benchmarking requires establishing empirical planning envelopes before training. Below is the hardware planning envelope for local and cloud execution:
 
 ```
-================================================================================================================
-MODEL FAMILY          TRAINING VRAM (EMPIRICAL)    INFERENCE VRAM (FP16)    FEASIBILITY ON RTX 3070 (8GB)
-================================================================================================================
-ACT (Dual ResNet18)   ~3.5 - 5.5 GB (Batch=8/16)   ~1.2 GB (50 Hz)          VERIFIED OK (Primary Local Workhorse)
-ACT (DINOv2 ViT-B)    ~8.5 - 12.0 GB (Batch=8)     ~2.4 GB (35 Hz)          Inference Only (OOM on Train)
-Diffusion Policy      ~8.0 - 14.0 GB (Batch=32)    ~1.8 GB (50 Hz)          Inference Only (Requires >8GB Train)
-SmolVLA-450M          ~10.0 - 16.0 GB (Full/BF16)  ~1.5 GB (4-bit/FP16)     Inference OK (Train on Cloud/4090)
-pi_0 / pi_0-FAST      ~24.0 - 40.0 GB              ~6.0 GB (BF16)           Out of Scope for 8GB
-OpenVLA-7B (LoRA)     ~27.0 - 32.0 GB (A100 min)   ~4.8 GB (NF4 Quantized)  Out of Scope for 8GB
-================================================================================================================
+====================================================================================================================
+MODEL FAMILY             TRAINING VRAM (PLANNING)     INFERENCE VRAM (FP16)    FEASIBILITY ON RTX 3070 (8GB)
+====================================================================================================================
+ACT (Dual ResNet18)      ~3.5 - 5.5 GB (Batch=8/16)   ~1.2 GB (50 Hz)          Target Envelope (Validate in Gate 0)
+ACT (DINOv2 ViT-B)       ~8.5 - 12.0 GB (Batch=8)     ~2.4 GB (35 Hz)          Inference Only (OOM on Train)
+Diffusion Policy         ~8.0 - 14.0 GB (Batch=32)    ~1.8 GB (50 Hz)          Inference Only (Requires >8GB Train)
+SmolVLA-450M             ~10.0 - 16.0 GB (Full/BF16)  ~1.5 GB (4-bit/FP16)     Inference OK (Train on Cloud/4090)
+pi_0 / pi_0-FAST         ~24.0 - 40.0 GB              ~6.0 GB (BF16)           Out of Scope for 8GB
+OpenVLA-7B (LoRA)        ~27.0 - 32.0 GB (A100 min)   ~4.8 GB (NF4 Quantized)  Out of Scope for 8GB
+====================================================================================================================
 ```
 
-### 4.2 Engineering Discipline: Why RTX 3070 + ACT is the Optimal Pair
-1. **Zero Out-of-Memory Risk:** Training ACT with dual ResNet18 visual backbones (`top` overhead camera + `wrist` camera) consumes **~4.2 GB VRAM** under PyTorch mixed precision (`torch.cuda.amp`), leaving comfortable headroom on the 8GB RTX 3070.
-2. **Deterministic Iteration:** Training a 50-episode ACT policy takes **~45 minutes** locally. This allows rapid experimental iteration on hyperparameters, loss weights, and chunk sizes rather than waiting days for large VLA fine-tuning runs.
-3. **No Cloud Dependency for Motor Control:** Motor execution runs 100% locally at 50 Hz. Only the supervisory layer (1–2 Hz) calls the Gemini API.
+### 4.2 Engineering Discipline: Bounded Memory Budget (<6.0 GB Envelope)
+1. **Memory Budget Planning:** Training ACT with dual ResNet18 visual backbones (`top` overhead camera + in-hand `wrist` camera) consumes an estimated **~4.2 GB VRAM** under PyTorch mixed precision (`torch.cuda.amp.autocast`), leaving a safe buffer on the 8GB RTX 3070.
+2. **Empirical Gate 0 Validation:** Rather than assuming static memory figures, the researcher logs empirical hardware metrics during Gate 0:
+   * `peak_vram_mb`: Monitored via `torch.cuda.max_memory_allocated()`.
+   * `steps_per_second`: Effective batch processing throughput.
+   * `training_duration`: Wall-clock time across 50 demonstration episodes.
+   * `inference_p50` & `inference_p99`: 50 Hz control loop latency percentiles.
+3. **Local Visuomotor Execution:** Motor execution runs 100% locally at 50 Hz. Only the supervisory layer calls the Gemini API at ~0.5–2 Hz asynchronously.
 
 ---
 
@@ -211,283 +266,547 @@ Instead of asking *"Can we get a robot to move with Gemini and LeRobot?"*, this 
 
 > **"Under which distribution shifts does hierarchical semantic reasoning provide measurable benefits over pure imitation learning, and how much does closed-loop anomaly replanning recover failed tasks?"**
 
-### 5.1 The 4 Evaluated Systems
+### 5.1 The Evaluated Systems (Clear Separation of Baselines)
 
-| System ID | Perception & Reasoning Tier | Low-Level Controller | Control Nature |
-| :--- | :--- | :--- | :--- |
-| **System A (Classical)** | Ground-truth simulator state / analytical geometry | Jacobian DLS Inverse Kinematics + PD | Deterministic baseline |
-| **System B (Pure ACT)** | Dual camera RGB (`top` + `wrist`) + Proprioception | Hugging Face LeRobot ACT Policy (50 Hz) | Learned visuomotor |
-| **System C (Agentic ACT)** | Gemini Robotics ER 2 (Subgoal + Affordance box) | LeRobot ACT conditioned on subgoals | Hierarchical open-loop |
-| **System D (Agentic + Recovery)**| Gemini Robotics ER 2 (Subgoal + Online Verification) | LeRobot ACT + Autonomous Recovery Replan | Hierarchical closed-loop |
+To maintain scientific clarity, the benchmark evaluates five distinct system configurations:
+
+| System ID | Perception & Reasoning Tier | Low-Level Controller | Control Paradigm | Goal Conditioning Vector |
+| :--- | :--- | :--- | :--- | :--- |
+| **Oracle** | Ground-truth MuJoCo state (`data.xpos`) | Jacobian DLS IK + PD | Kinematic Upper Bound | Direct analytical pose |
+| **System A (Classical)** | RGB-D unprojection + color segmentation | Jacobian DLS IK + PD | Classical Vision-Guided | None (local geometric) |
+| **System B (Pure ACT)** | Dual RGB (`top` + `wrist`) + Proprioception | LeRobot ACT Policy (50 Hz) | Unconditioned Visuomotor IL | None (implicit visual) |
+| **System C (Agentic ACT)** | Gemini ER 2 (Async ~0.5–2 Hz) $\to$ $\mathbf{g}_t$ | LeRobot ACT Policy (50 Hz) | Hierarchical Open-Loop | Explicit $\mathbf{g}_t \in \mathbb{R}^{11}$ |
+| **System D (Agentic + Recovery)**| Gemini ER 2 Online Verification $\to$ Replanning | LeRobot ACT + `policy.reset()` | Hierarchical Closed-Loop | Dynamically Replanned $\mathbf{g}_t$ |
 
 ### 5.2 The 5 Evaluation Conditions (Stress-Testing Generalization)
 
 ```mermaid
 graph TD
     subgraph S1 ["1. Nominal (IID)"]
-        C1["Standard Red Cube in Central Workspace"]
+        C1["Standard Red Cube in Central Workspace [0.32, 0.05, 0.43]"]
     end
     subgraph S2 ["2. Geometric Shift (OOD)"]
-        C2["Cube Placed in Unseen Workspace Boundary"]
+        C2["Cube Placed at Extreme Workspace Boundary [0.42, -0.18, 0.43]"]
     end
     subgraph S3 ["3. Visual Clutter / Distractors"]
-        C3["Multiple Colored Distractor Blocks Added"]
+        C3["Multiple Colored Distractor Blocks Surrounding Manipuland"]
     end
     subgraph S4 ["4. Appearance & Lighting Shift"]
-        C4["Randomized Table Textures and Lighting Angles"]
+        C4["Randomized Table Textures and Dynamic Light Vector Shifting"]
     end
     subgraph S5 ["5. Mid-Trajectory Disturbance"]
-        C5["Cube Physically Displaced During Grasp Execution"]
+        C5["Cube Physically Displaced (+8cm X, -6cm Y) Mid-Trajectory"]
     end
 ```
 
-### 5.3 Empirical Metric Protocol (Zero Hype)
-To maintain strict scientific integrity, all results are reported as **measured empirical statistics** across $N=20$ randomized rollouts per condition:
-* **Grasp Success Rate (%):** Object lifted $>5\,\text{cm}$ above the table plane.
-* **Task Completion Rate (%):** Object deposited cleanly within target zone.
-* **Disturbance Recovery Rate (%):** Successful task completion following mid-trajectory slip or displacement.
-* **Mean Trajectory Jerk ($\text{rad}/\text{s}^3$):** Third derivative of joint positions, quantifying mechanical wear:
-  $$j = \frac{1}{T} \sum_{t=1}^T \left\| \frac{\mathbf{q}_t - 3\mathbf{q}_{t-1} + 3\mathbf{q}_{t-2} - \mathbf{q}_{t-3}}{\Delta t^3} \right\|_2$$
-* **Control Loop Latency (ms):** Mean and 99th-percentile inference latency.
+### 5.3 Empirical Metric Protocol & Statistical Rigor
+
+To guarantee scientific credibility and statistical reproducibility, all evaluations adhere to the following protocol:
+* **Paired Scenario Seeds:** Evaluated across $N=20$ randomized rollouts per condition. Every system (Oracle, A, B, C, D) receives the exact identical environment state and disturbance vector per seed (`seed 001` .. `seed 020`).
+* **Confidence Intervals:**
+  - For binary success proportions (Grasp Success, Task Completion, Disturbance Recovery), report **Wilson 95% Score Confidence Intervals**:
+    $$w = \frac{\hat{p} + \frac{z^2}{2N} \pm z \sqrt{\frac{\hat{p}(1-\hat{p})}{N} + \frac{z^2}{4N^2}}}{1 + \frac{z^2}{N}}, \quad z = 1.96$$
+  - For continuous metrics, report sample mean $\pm$ sample standard deviation along with non-parametric **Bootstrap 95% CIs** (10,000 resamples).
+* **Metrics:**
+  - **Grasp Success Rate (%):** Object lifted $>5\,\text{cm}$ above the table plane.
+  - **Task Completion Rate (%):** Object deposited cleanly within the target drop zone.
+  - **Disturbance Recovery Rate (%):** Successful task completion following mid-trajectory disturbance injection.
+  - **Mean Trajectory Jerk ($\text{rad}/\text{s}^3$):** Proxy for motion smoothness and aggressive actuator command variation:
+    $$j = \frac{1}{T} \sum_{t=1}^T \left\| \frac{\mathbf{q}_t - 3\mathbf{q}_{t-1} + 3\mathbf{q}_{t-2} - \mathbf{q}_{t-3}}{\Delta t^3} \right\|_2$$
+    *(Direct mechanical wear/stress assessment requires physical motor current/torque instrumentation on hardware).*
+  - **Control Loop Latency (ms):** Mean and 99th-percentile inference latency for the 50 Hz execution thread.
+* **Scenario Manifest Logging (`scenario_manifest.jsonl`):**
+  Every rollout automatically writes a comprehensive provenance record containing:
+  `seed`, `cube_initial_pose`, `target_zone_pose`, `distractor_poses`, `texture_seed`, `lighting_vector`, `disturbance_time_step`, `disturbance_displacement`, `model_name`, `checkpoint_sha256`, `git_commit_hash`.
 
 ---
 
-## 6. Complete Reference Blueprint: `agentic_manipulation_benchmark.py`
+## 6. Architectural Reference Scaffold: `agentic_manipulation_benchmark.py`
 
-This module provides the verified reference implementation:
-1. Pydantic-grounded Gemini Robotics ER 2 interface with closed-loop verification.
-2. Classical Jacobian DLS Inverse Kinematics controller.
-3. Hugging Face LeRobot ACT policy executor with correct `select_action()` queue management.
-4. MuJoCo EGL simulation environment with dual cameras and disturbance injection.
+This module provides the architectural reference scaffold defining:
+1. Authentic 6-DoF articulated robot arm + parallel gripper MJCF with attached `ee_site` and in-hand `wrist_cam`.
+2. Asynchronous concurrency: Cognitive supervisor thread decoupled from the deterministic 50 Hz control thread via a thread-safe `AtomicPlanState`.
+3. Dynamic camera calibration and ray unprojection with explicit `INVALID_DEPTH` error handling.
+4. Schema-constrained Pydantic supervisor with application-level validation and fixed `gemini-robotics-er-2-preview` model routing (no silent fallback).
+5. Goal-conditioned ACT policy interface with LeRobot 0.6+ `PolicyProcessorPipeline` scaffolding and explicit `policy.reset()` queue flushing upon disturbance recovery.
+6. Unified benchmark dispatch executing Oracle, System A, System B, System C, and System D.
+
+*(Note: Regard this implementation as an architectural reference scaffold to guide repository development; full empirical validation occurs across Gates 0–5).*
 
 ```python
 """
 agentic_manipulation_benchmark.py
-Hierarchical Embodied Reasoning and Visuomotor Control Benchmark:
-- Gemini Robotics ER 2: Supervisory Reasoning, Spatial Grounding & Anomaly Recovery
-- Hugging Face LeRobot: 50 Hz Action Chunking with Transformers (ACT)
-- DeepMind MuJoCo: Deterministic Physics with EGL Headless Support & Jacobian DLS IK
+Architectural Reference Scaffold:
+- DeepMind MuJoCo: 6-DoF Articulated Robot Arm + Gripper + Dual Cameras (Overhead & In-Hand Wrist)
+- Dynamic Camera Calibration: FOV-derived K matrix + world unprojection (INVALID_DEPTH guarded)
+- Cognitive Supervisory Tier: Asynchronous Gemini Robotics ER 2 (~0.5-2 Hz) with Thread-Safe Shared State
+- Visuomotor Policy Tier: 50 Hz Goal-Conditioned ACT with LeRobot PolicyProcessorPipeline & policy.reset()
+- Full Benchmark Dispatch: Oracle, System A (Classical), System B (ACT), System C (Agentic), System D (Recovery)
 """
 
 import os
-os.environ.setdefault("MUJOCO_GL", "egl")
-
+import sys
 import time
+import threading
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 import cv2
 import torch
 import mujoco
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from google import genai
 from google.genai import types
 
+# Enforce EGL headless rendering before MuJoCo contexts initialize
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 # -----------------------------------------------------------------------------
-# 1. Cognitive Supervisory Tier (Gemini Robotics ER 2 Schemas & Client)
+# 1. Authentic Articulated 6-DoF Robot Arm Model (MJCF)
+# -----------------------------------------------------------------------------
+REFERENCE_ARM_MJCF = """
+<mujoco model="embodied_6dof_arm">
+    <compiler angle="radian" coordinate="local"/>
+    <option gravity="0 0 -9.81" timestep="0.002" integrator="implicitfast"/>
+    <visual>
+        <global offwidth="640" offheight="480"/>
+    </visual>
+    
+    <asset>
+        <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+        <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2"/>
+        <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2"/>
+    </asset>
+
+    <worldbody>
+        <light directional="true" pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
+        <geom name="floor" type="plane" size="1.2 1.2 0.1" material="grid"/>
+        <geom name="table" type="box" pos="0.3 0 0.2" size="0.4 0.5 0.2" rgba="0.85 0.85 0.88 1"/>
+        
+        <!-- 6-DoF Articulated Robot Arm: qpos[0:6] = joints 1..6, qpos[6] = finger_joint1 -->
+        <body name="base" pos="0 0 0.4">
+            <geom name="base_link" type="cylinder" size="0.06 0.02" rgba="0.25 0.25 0.28 1"/>
+            <body name="link1" pos="0 0 0.04">
+                <joint name="joint1" type="hinge" axis="0 0 1" range="-3.1416 3.1416" damping="1.5" armature="0.05"/>
+                <geom name="l1" type="capsule" fromto="0 0 0 0 0 0.1" size="0.035" rgba="0.2 0.45 0.75 1" mass="0.8"/>
+                <body name="link2" pos="0 0 0.1">
+                    <joint name="joint2" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="1.5" armature="0.05"/>
+                    <geom name="l2" type="capsule" fromto="0 0 0 0 0 0.16" size="0.03" rgba="0.2 0.45 0.75 1" mass="0.6"/>
+                    <body name="link3" pos="0 0 0.16">
+                        <joint name="joint3" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="1.0" armature="0.03"/>
+                        <geom name="l3" type="capsule" fromto="0 0 0 0 0 0.16" size="0.025" rgba="0.2 0.45 0.75 1" mass="0.4"/>
+                        <body name="gripper_base" pos="0 0 0.16">
+                            <joint name="joint4" type="hinge" axis="0 0 1" range="-3.1416 3.1416" damping="0.5" armature="0.02"/>
+                            <joint name="joint5" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.5" armature="0.02"/>
+                            <joint name="joint6" type="hinge" axis="1 0 0" range="-3.1416 3.1416" damping="0.5" armature="0.02"/>
+                            <geom name="palm" type="box" size="0.025 0.035 0.015" rgba="0.15 0.15 0.18 1" mass="0.2"/>
+                            
+                            <!-- End-Effector Kinematic Site Attached to End-Effector -->
+                            <site name="ee_site" pos="0 0 0.04" size="0.008" rgba="0 1 0 1"/>
+                            
+                            <!-- In-Hand Wrist Camera Attached to Gripper Base -->
+                            <camera name="wrist_cam" pos="0 0.035 0.02" euler="0 0.5 1.5708"/>
+                            
+                            <!-- Parallel Jaw Gripper -->
+                            <body name="finger_left" pos="0 0.025 0.035">
+                                <joint name="finger_joint1" type="slide" axis="0 1 0" range="-0.025 0.025" damping="0.5" armature="0.01"/>
+                                <geom name="f1" type="box" size="0.006 0.006 0.025" rgba="0.9 0.75 0.1 1" mass="0.05" friction="1.5 0.01 0.001"/>
+                            </body>
+                            <body name="finger_right" pos="0 -0.025 0.035">
+                                <geom name="f2" type="box" size="0.006 0.006 0.025" rgba="0.9 0.75 0.1 1" mass="0.05" friction="1.5 0.01 0.001"/>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+
+        <!-- Manipuland Cube (Freejoint, dynamic indexing safe) -->
+        <body name="target_cube" pos="0.32 0.05 0.43">
+            <freejoint name="cube_joint"/>
+            <geom name="cube_geom" type="box" size="0.022 0.022 0.022" rgba="0.92 0.15 0.15 1" mass="0.05" friction="1.2 0.005 0.0001"/>
+        </body>
+
+        <!-- Receptacle Target Zone -->
+        <body name="target_zone" pos="0.32 -0.15 0.401">
+            <geom name="zone_marker" type="cylinder" size="0.06 0.002" rgba="0.1 0.8 0.2 0.6"/>
+        </body>
+
+        <!-- Overhead Static Camera Attached to Worldbody -->
+        <camera name="overhead_cam" pos="0.65 0 0.9" euler="0 0.75 1.5708"/>
+    </worldbody>
+
+    <!-- Robot Actuator Interface (Position Servos) -->
+    <actuator>
+        <position name="act_j1" joint="joint1" kp="60"/>
+        <position name="act_j2" joint="joint2" kp="60"/>
+        <position name="act_j3" joint="joint3" kp="50"/>
+        <position name="act_j4" joint="joint4" kp="30"/>
+        <position name="act_j5" joint="joint5" kp="30"/>
+        <position name="act_j6" joint="joint6" kp="30"/>
+        <position name="act_gripper" joint="finger_joint1" kp="30"/>
+    </actuator>
+</mujoco>
+"""
+
+# -----------------------------------------------------------------------------
+# 2. Dynamic Camera Geometry & Calibrated 3D Metric Unprojection
+# -----------------------------------------------------------------------------
+class InvalidDepthError(Exception):
+    """Raised when sampled depth violates operational camera bounds."""
+    pass
+
+class CameraGeometry:
+    """
+    Derives intrinsic matrix K and extrinsic transformation T_world_cam dynamically
+    from MuJoCo camera parameters, performing metric unprojection with bound checks.
+    """
+    def __init__(self, model: mujoco.MjModel, camera_name: str, width: int = 640, height: int = 480):
+        self.model = model
+        self.camera_name = camera_name
+        self.camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
+        if self.camera_id == -1:
+            raise ValueError(f"Camera '{camera_name}' not found in MuJoCo model.")
+        self.width = width
+        self.height = height
+
+        # Derive intrinsics from vertical field of view (fovy)
+        fovy_rad = np.deg2rad(self.model.cam_fovy[self.camera_id])
+        self.fy = (height / 2.0) / np.tan(fovy_rad / 2.0)
+        self.fx = self.fy  # Standard square pixels
+        self.cx = width / 2.0
+        self.cy = height / 2.0
+        self.K = np.array([
+            [self.fx, 0.0, self.cx],
+            [0.0, self.fy, self.cy],
+            [0.0, 0.0, 1.0]
+        ], dtype=np.float64)
+        self.inv_K = np.linalg.inv(self.K)
+
+    def unproject_pixel_to_world(
+        self,
+        u: float,
+        v: float,
+        depth: float,
+        data: mujoco.MjData,
+        min_depth: float = 0.05,
+        max_depth: float = 2.5
+    ) -> np.ndarray:
+        """
+        Unprojects a 2D pixel coordinate (u, v) and metric depth into 3D world coordinates.
+        Raises InvalidDepthError if depth reading is outside valid physical range.
+        """
+        if not (min_depth <= depth <= max_depth) or np.isnan(depth):
+            raise InvalidDepthError(f"INVALID_DEPTH: Sampled depth {depth:.4f}m outside [{min_depth}, {max_depth}]m")
+
+        # Camera frame optical ray
+        p_cam = depth * (self.inv_K @ np.array([u, v, 1.0], dtype=np.float64))
+
+        # Extrinsics from MuJoCo data (cam_xpos and cam_xmat)
+        cam_pos = data.cam_xpos[self.camera_id]
+        cam_rot = data.cam_xmat[self.camera_id].reshape(3, 3)
+
+        # MuJoCo camera coordinate convention: +X right, +Y up, -Z optical axis
+        # Standard robotics optical frame: +X right, +Y down, +Z optical axis
+        r_mujoco_optical = np.array([
+            [1.0,  0.0,  0.0],
+            [0.0, -1.0,  0.0],
+            [0.0,  0.0, -1.0]
+        ], dtype=np.float64)
+
+        p_world = cam_pos + cam_rot @ (r_mujoco_optical @ p_cam)
+        return p_world
+
+# -----------------------------------------------------------------------------
+# 3. Cognitive Supervisory Tier & Thread-Safe Concurrency
 # -----------------------------------------------------------------------------
 class SpatialGroundingPlan(BaseModel):
     sub_goal: str = Field(description="Active sub-task: 'reach', 'grasp', 'lift', 'transport', 'recover'")
     target_object: str = Field(description="Identified manipuland name")
     target_box_2d: List[int] = Field(description="Normalized [ymin, xmin, ymax, xmax] in [0, 1000]")
+    destination_box_2d: Optional[List[int]] = Field(default=None, description="Receptacle [ymin, xmin, ymax, xmax]")
     task_progress: str = Field(description="'in_progress', 'completed', or 'failure_detected'")
-    requires_replanning: bool = Field(default=False, description="True if object was displaced or grasp failed")
+    requires_replanning: bool = Field(default=False, description="True if anomaly or grasp failure detected")
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @field_validator("target_box_2d")
+    def validate_box(cls, v: List[int]) -> List[int]:
+        if len(v) != 4:
+            raise ValueError("target_box_2d must contain exactly 4 normalized coordinates.")
+        if not (0 <= v[0] < v[2] <= 1000 and 0 <= v[1] < v[3] <= 1000):
+            raise ValueError("Bounding box coordinates must satisfy 0 <= min < max <= 1000.")
+        return v
+
+class SupervisorAPIError(Exception):
+    """Raised when cognitive API calls fail after exhaustive retries."""
+    pass
 
 class CognitiveSupervisor:
     """
-    Supervisory agent running at 1-2 Hz. Decomposes tasks, detects affordance boxes,
-    and performs closed-loop anomaly detection.
+    Cognitive supervisor running on gemini-robotics-er-2-preview.
+    Enforces application-level semantic validation and exponential backoff retry.
+    Never silently falls back to a different model.
     """
     def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-robotics-er-2-preview"):
-        self.client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY"))
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_name = model_name
 
     def analyze_scene(
         self,
         rgb_image: np.ndarray,
         task_instruction: str,
-        current_subgoal: str = "initial"
+        current_subgoal: str = "initial",
+        max_retries: int = 2
     ) -> SpatialGroundingPlan:
+        if not self.client:
+            raise RuntimeError("GEMINI_API_KEY is not set. Cannot run remote CognitiveSupervisor.")
+
         _, buffer = cv2.imencode(".jpg", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
         image_bytes = buffer.tobytes()
 
         prompt = f"""
-        You are the cognitive supervisory brain for a 6-DOF robotic manipulator.
+        You are the cognitive supervisory brain for an articulated 6-DoF robotic manipulator.
         Task Goal: "{task_instruction}"
         Current Phase: "{current_subgoal}"
 
         Instructions:
-        1. Identify the active manipuland target box in normalized coordinates [ymin, xmin, ymax, xmax] in 0-1000.
-        2. Assess current progress. If the object slipped from the gripper or was moved unexpectedly, set requires_replanning=True.
-        3. Emit next actionable subgoal: 'reach', 'grasp', 'lift', 'transport', or 'recover'.
+        1. Identify the target manipuland box in normalized coordinates [ymin, xmin, ymax, xmax] in 0-1000.
+        2. Identify destination receptacle box if appropriate.
+        3. Assess progress: if the cube slipped, was displaced, or is unreachable, set requires_replanning=True.
+        4. Emit next actionable subgoal: 'reach', 'grasp', 'lift', 'transport', or 'recover'.
         """
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=[types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"), prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SpatialGroundingPlan,
-                    temperature=0.1
+
+        last_err = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=[types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"), prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=SpatialGroundingPlan,
+                        temperature=0.1
+                    )
                 )
-            )
-            return SpatialGroundingPlan.model_validate_json(response.text)
-        except Exception:
-            # Fallback to gemini-2.0-flash if preview model endpoint is congested
-            response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"), prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SpatialGroundingPlan,
-                    temperature=0.1
-                )
-            )
-            return SpatialGroundingPlan.model_validate_json(response.text)
+                plan = SpatialGroundingPlan.model_validate_json(response.text)
+                return plan
+            except Exception as e:
+                last_err = e
+                if attempt < max_retries:
+                    time.sleep(0.5 * (2 ** attempt))
+
+        raise SupervisorAPIError(f"CognitiveSupervisor failed on {self.model_name} after {max_retries} retries: {last_err}")
+
+class AtomicPlanState:
+    """Thread-safe shared state container for asynchronous supervisory communication."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.plan: Optional[SpatialGroundingPlan] = None
+        self.target_pos_world: Optional[np.ndarray] = None
+        self.dest_pos_world: Optional[np.ndarray] = None
+        self.subgoal_id: int = 0
+        self.version: int = 0
+
+    def update(
+        self,
+        plan: SpatialGroundingPlan,
+        target_pos_world: Optional[np.ndarray],
+        dest_pos_world: Optional[np.ndarray],
+        subgoal_id: int
+    ):
+        with self._lock:
+            self.plan = plan
+            self.target_pos_world = target_pos_world
+            self.dest_pos_world = dest_pos_world
+            self.subgoal_id = subgoal_id
+            self.version += 1
+
+    def get_snapshot(self) -> Tuple[Optional[SpatialGroundingPlan], Optional[np.ndarray], Optional[np.ndarray], int, int]:
+        with self._lock:
+            return self.plan, self.target_pos_world, self.dest_pos_world, self.subgoal_id, self.version
 
 # -----------------------------------------------------------------------------
-# 2. Classical Robotics Baseline: Jacobian Damped Least Squares IK Controller
+# 4. Classical Robotics Baselines (Oracle & System A)
 # -----------------------------------------------------------------------------
 class ClassicalIKController:
     """
-    True robotics baseline: Unprojects 2D image coordinates to 3D workspace
-    and computes joint velocity targets via Damped Least Squares (DLS) Jacobian IK.
+    Jacobian Damped Least Squares (DLS) Inverse Kinematics controller for 6-DoF arm.
     """
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, damping: float = 0.05):
         self.model = model
         self.data = data
         self.damping = damping
-        self.end_effector_site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
+        self.ee_site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
+        self.arm_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+        self.arm_qpos_indices = [self.model.jnt_qposadr[self.model.joint(j).id] for j in self.arm_joint_names]
+        self.gripper_qpos_idx = self.model.jnt_qposadr[self.model.joint("finger_joint1").id]
 
-    def unproject_2d_to_3d(
-        self,
-        box_2d: List[int],
-        depth_map: np.ndarray,
-        focal_px: float = 400.0,
-        cx: float = 320.0,
-        cy: float = 240.0
-    ) -> np.ndarray:
-        # Convert [0, 1000] to image pixels
-        ymin, xmin, ymax, xmax = box_2d
-        u_c = int((xmin + xmax) / 2000.0 * 640)
-        v_c = int((ymin + ymax) / 2000.0 * 480)
-        u_c = np.clip(u_c, 0, 639)
-        v_c = np.clip(v_c, 0, 479)
-
-        depth = depth_map[v_c, u_c]
-        if depth <= 0.01:
-            depth = 0.6  # Default workspace table distance
-
-        # P_camera = [X_c, Y_c, Z_c]
-        x_c = (u_c - cx) * depth / focal_px
-        y_c = (v_c - cy) * depth / focal_px
-        z_c = depth
-
-        # Fixed top-down camera extrinsics to robot world frame
-        # Camera is pos=[0.3, 0, 1.0] looking downward
-        target_world = np.array([0.3 + y_c, x_c, 1.0 - z_c])
-        return target_world
-
-    def solve_ik_step(self, target_pos_world: np.ndarray) -> np.ndarray:
-        """
-        Calculates joint position targets q* using Damped Least Squares IK:
-        dq = J^T (J J^T + lambda^2 I)^-1 * err
-        """
-        current_ee_pos = self.data.site_xpos[self.end_effector_site_id]
+    def solve_ik_step(self, target_pos_world: np.ndarray, gripper_cmd: float = 0.02) -> np.ndarray:
+        """Computes 7-element actuator target position vector [q1..q6, q_grip]."""
+        current_ee_pos = self.data.site_xpos[self.ee_site_id]
         error = target_pos_world - current_ee_pos
 
-        # Translation Jacobian (3 x nv)
         jac_pos = np.zeros((3, self.model.nv))
-        mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.end_effector_site_id)
+        mujoco.mj_jacSite(self.model, self.data, jac_pos, None, self.ee_site_id)
 
-        # Slice robot arm DoFs (first 6 joints)
+        # Slice 6 robot arm velocity DoFs (safe addressing)
         j_arm = jac_pos[:, :6]
         lambda_sq = (self.damping ** 2) * np.eye(3)
         inv_term = np.linalg.inv(j_arm @ j_arm.T + lambda_sq)
         dq = j_arm.T @ inv_term @ error
 
-        current_q = np.array([self.data.qpos[self.model.jnt_qposadr[j]] for j in range(6)])
-        target_q = current_q + np.clip(dq, -0.1, 0.1)
-        return target_q
+        current_q = np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices])
+        target_arm_q = current_q + np.clip(dq, -0.08, 0.08)
+        return np.concatenate([target_arm_q, [gripper_cmd]])
 
 # -----------------------------------------------------------------------------
-# 3. Visuomotor Policy Tier: Hugging Face LeRobot ACT Policy
+# 5. Visuomotor Policy Tier: LeRobot ACT with Processors & Goal Conditioning
 # -----------------------------------------------------------------------------
-class VisuomotorPolicyExecutor:
+SUBGOAL_MAP = {"reach": 0, "grasp": 1, "lift": 2, "transport": 3, "recover": 4}
+
+class GoalConditionedACTPolicyExecutor:
     """
-    Integrates Hugging Face LeRobot ACTPolicy. Correctly handles:
-    - Queue-based single action stepping via policy.select_action(obs)
-    - Full action chunk forward-pass inspection via policy.model()
+    Integrates Hugging Face LeRobot ACTPolicy conforming to the LeRobot 0.6+ processing flow:
+    raw MuJoCo observation -> environment processor -> LeRobot policy preprocessor ->
+    ACT select_action() -> LeRobot postprocessor -> environment/action adapter -> MuJoCo actuator.
+    
+    Explicitly supports:
+    - Goal conditioning vector g_t in R^11 (target xyz, dest xyz, one-hot subgoal)
+    - policy.reset() queue flushing upon dynamic disturbance recovery
     """
-    def __init__(self, pretrained_policy_path: Optional[str] = None, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(
+        self,
+        pretrained_policy_path: Optional[str] = None,
+        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    ):
         self.device = torch.device(device)
         self.policy = None
+        self.preprocessor = None
+        self.postprocessor = None
 
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
                 from lerobot.common.policies.act.modeling_act import ACTPolicy
                 self.policy = ACTPolicy.from_pretrained(pretrained_policy_path).to(self.device)
                 self.policy.eval()
-                self.policy.reset()  # Reset internal LeRobot action queue
-                print(f"[PolicyExecutor] Loaded Hugging Face LeRobot ACTPolicy from {pretrained_policy_path}")
+                self.policy.reset()
+                # In LeRobot 0.6+, load external preprocessor and postprocessor pipelines if present
+                try:
+                    from lerobot.policies import make_pre_post_processors
+                    self.preprocessor, self.postprocessor = make_pre_post_processors(
+                        policy_cfg=self.policy.config
+                    )
+                except Exception:
+                    pass
+                print(f"[PolicyExecutor] Loaded LeRobot ACTPolicy from {pretrained_policy_path}")
             except Exception as e:
-                print(f"[PolicyExecutor] Checkpoint load warning: {e}. Defaulting to baseline mode.")
+                print(f"[PolicyExecutor] LeRobot checkpoint load notice: {e}. Defaulting to scaffold.")
+
+    def reset(self):
+        """Flushes LeRobot internal action queue buffer during replanning."""
+        if self.policy is not None and hasattr(self.policy, "reset"):
+            self.policy.reset()
+
+    def environment_processor(
+        self,
+        rgb_top: np.ndarray,
+        rgb_wrist: np.ndarray,
+        proprioception: np.ndarray,
+        goal_vector: Optional[np.ndarray] = None
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Stage 1: Raw MuJoCo observation -> Environment Processor.
+        Converts sensor arrays into raw tensor dictionary adhering to LeRobot dataset keys.
+        """
+        batch = {
+            "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).to(self.device),
+            "observation.images.wrist": torch.from_numpy(rgb_wrist).permute(2, 0, 1).unsqueeze(0).to(self.device),
+            "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
+        }
+        if goal_vector is not None:
+            batch["observation.goal"] = torch.from_numpy(goal_vector).unsqueeze(0).float().to(self.device)
+        return batch
+
+    def environment_action_adapter(self, action: Any) -> np.ndarray:
+        """
+        Stage 5: Environment / Action Adapter -> MuJoCo actuator command.
+        Converts postprocessed tensor to numpy joint command and clips to actuator limits.
+        """
+        if isinstance(action, torch.Tensor):
+            action_np = action.squeeze(0).detach().cpu().numpy()
+        else:
+            action_np = np.asarray(action)
+        return np.clip(action_np, -3.14, 3.14)
 
     def select_action(
         self,
         rgb_top: np.ndarray,
         rgb_wrist: np.ndarray,
-        proprioception: np.ndarray
+        proprioception: np.ndarray,
+        goal_vector: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Executes policy at 50 Hz. Consumes next action from internal LeRobot queue,
-        automatically triggering a forward chunk pass when the queue empties.
+        Executes full LeRobot 0.6+ pipeline at 50 Hz:
+        raw MuJoCo obs -> env processor -> policy preprocessor -> ACT select_action() -> postprocessor -> action adapter.
         """
         if self.policy is not None:
-            obs_dict = {
-                "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).unsqueeze(0).float().to(self.device) / 255.0,
-                "observation.images.wrist": torch.from_numpy(rgb_wrist).permute(2, 0, 1).unsqueeze(0).float().to(self.device) / 255.0,
-                "observation.state": torch.from_numpy(proprioception).unsqueeze(0).float().to(self.device)
-            }
-            with torch.no_grad():
-                # LeRobot returns single 1D action tensor for the current timestep
-                action = self.policy.select_action(obs_dict)
-            return action.squeeze(0).cpu().numpy()
+            # 1. Environment Processor
+            batch = self.environment_processor(rgb_top, rgb_wrist, proprioception, goal_vector)
 
-        # Fallback: maintain position
+            # 2. LeRobot Policy Preprocessor (externalized normalization)
+            if self.preprocessor is not None:
+                batch = self.preprocessor(batch)
+            else:
+                # Fallback image float casting if preprocessor pipeline is absent
+                batch["observation.images.top"] = batch["observation.images.top"].float() / 255.0
+                batch["observation.images.wrist"] = batch["observation.images.wrist"].float() / 255.0
+
+            # 3. Policy select_action() (manages internal temporal action chunk queue)
+            with torch.no_grad():
+                raw_action = self.policy.select_action(batch)
+
+            # 4. LeRobot Policy Postprocessor (externalized denormalization)
+            if self.postprocessor is not None:
+                processed_action = self.postprocessor(raw_action)
+            else:
+                processed_action = raw_action
+
+            # 5. Environment / Action Adapter
+            return self.environment_action_adapter(processed_action)
+
+        # Scaffold fallback: maintain current joint positions
         return proprioception
 
 # -----------------------------------------------------------------------------
-# 4. Simulation Arena & Closed-Loop Benchmark Execution
+# 6. Simulation Arena & Multi-System Benchmark Execution
 # -----------------------------------------------------------------------------
 class MuJoCoManipulationArena:
-    """
-    Headless EGL MuJoCo Arena with overhead + in-hand cameras and disturbance injection.
-    """
+    """MuJoCo simulation arena wrapping 6-DoF arm, dual cameras, and physics stepping."""
     def __init__(self):
-        self.xml = """
-        <mujoco model="agentic_arm">
-            <compiler angle="radian" coordinate="local"/>
-            <option gravity="0 0 -9.81" timestep="0.002"/>
-            <visual><global offwidth="640" offheight="480"/></visual>
-            <worldbody>
-                <light directional="true" pos="0 0 3" dir="0 0 -1"/>
-                <geom name="floor" type="plane" size="1 1 0.1" rgba="0.8 0.8 0.8 1"/>
-                <geom name="table" type="box" pos="0.35 0 0.2" size="0.25 0.35 0.2" rgba="0.5 0.5 0.5 1"/>
-                <body name="cube" pos="0.30 0.05 0.43">
-                    <freejoint name="cube_joint"/>
-                    <geom name="cube_geom" type="box" size="0.02 0.02 0.02" rgba="0.9 0.1 0.1 1" mass="0.05"/>
-                </body>
-                <site name="ee_site" pos="0.30 0.05 0.43" size="0.01"/>
-                <camera name="overhead_cam" pos="0.35 0.0 0.9" euler="0 0 -1.57"/>
-            </worldbody>
-        </mujoco>
-        """
-        self.model = mujoco.MjModel.from_xml_string(self.xml)
+        self.model = mujoco.MjModel.from_xml_string(REFERENCE_ARM_MJCF)
         self.data = mujoco.MjData(self.model)
         self.renderer = mujoco.Renderer(self.model, height=480, width=640)
-        self.renderer.enable_depth_rendering()
 
-    def render_obs(self) -> Tuple[np.ndarray, np.ndarray]:
+        # Dynamic camera geometry helpers
+        self.cam_overhead = CameraGeometry(self.model, "overhead_cam", width=640, height=480)
+        self.cam_wrist = CameraGeometry(self.model, "wrist_cam", width=640, height=480)
+
+        # Joint & actuator indexing
+        self.arm_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "finger_joint1"]
+        self.arm_qpos_indices = [self.model.jnt_qposadr[self.model.joint(j).id] for j in self.arm_joint_names]
+        self.cube_body_id = self.model.body("target_cube").id
+
+        self.reset()
+
+    def reset(self):
+        mujoco.mj_resetData(self.model, self.data)
+        neutral_qpos = np.array([0.0, -0.4, 0.8, 0.0, 0.4, 0.0, 0.02], dtype=np.float64)
+        for idx, val in zip(self.arm_qpos_indices, neutral_qpos):
+            self.data.qpos[idx] = val
+        self.data.ctrl[:len(neutral_qpos)] = neutral_qpos
+        mujoco.mj_forward(self.model, self.data)
+
+    def render_overhead_rgbd(self) -> Tuple[np.ndarray, np.ndarray]:
         self.renderer.disable_depth_rendering()
         self.renderer.update_scene(self.data, camera="overhead_cam")
         rgb = self.renderer.render()
@@ -497,85 +816,206 @@ class MuJoCoManipulationArena:
         depth = self.renderer.render()
         return rgb, depth
 
-    def apply_mid_trajectory_disturbance(self):
-        """Simulates physical bump or object slippage."""
+    def render_wrist_rgb(self) -> np.ndarray:
+        self.renderer.disable_depth_rendering()
+        self.renderer.update_scene(self.data, camera="wrist_cam")
+        return self.renderer.render()
+
+    def get_proprioception(self) -> np.ndarray:
+        return np.array([self.data.qpos[idx] for idx in self.arm_qpos_indices], dtype=np.float32)
+
+    def get_cube_ground_truth_pos(self) -> np.ndarray:
+        return np.array(self.data.xpos[self.cube_body_id], dtype=np.float64)
+
+    def apply_disturbance(self):
+        """Simulates physical bump displacement."""
         cube_joint_id = self.model.joint("cube_joint").id
         qadr = self.model.jnt_qposadr[cube_joint_id]
-        self.data.qpos[qadr] += 0.08      # Shift 8cm along X
-        self.data.qpos[qadr + 1] -= 0.06  # Shift 6cm along Y
+        self.data.qpos[qadr] += 0.08      # +8cm X displacement
+        self.data.qpos[qadr + 1] -= 0.06  # -6cm Y displacement
         mujoco.mj_forward(self.model, self.data)
-        print("💥 [Disturbance Injected] Manipuland displaced!")
+        print("💥 [Disturbance Injected] Cube displaced (+8cm X, -6cm Y)!")
 
-def run_benchmark_episode(mode: str = "agentic_recovery"):
-    print(f"\n================ Running Benchmark Mode: {mode.upper()} ================")
+    def step(self, action: np.ndarray):
+        """Advances physics by 10 substeps (dt=0.002s * 10 = 20ms = 50 Hz)."""
+        self.data.ctrl[:len(action)] = np.clip(action, -3.14, 3.14)
+        for _ in range(10):
+            mujoco.mj_step(self.model, self.data)
+
+def run_benchmark_episode(system_id: str = "system_d", has_disturbance: bool = True):
+    """
+    Executes a benchmark episode for one of:
+    - 'oracle': Ground-truth state -> IK
+    - 'system_a': Classical RGB-D unprojection -> IK
+    - 'system_b': Pure unconditioned ACT policy
+    - 'system_c': Goal-conditioned ACT policy
+    - 'system_d': Goal-conditioned ACT policy + Async online verification & policy.reset() recovery
+    """
+    print(f"\n================ Running Benchmark: {system_id.upper()} (Disturbance={has_disturbance}) ================")
     arena = MuJoCoManipulationArena()
-    ik = ClassicalIKController(arena.model, arena.data)
-    policy = VisuomotorPolicyExecutor()
-    supervisor = CognitiveSupervisor() if os.environ.get("GEMINI_API_KEY") else None
+    ik_controller = ClassicalIKController(arena.model, arena.data)
+    policy_executor = GoalConditionedACTPolicyExecutor()
+    shared_plan_state = AtomicPlanState()
 
-    rgb, depth = arena.render_obs()
-    goal = "Pick up red cube and place in target zone"
-    active_plan = None
-    sim_steps = 250  # 5 seconds at 50Hz control
+    goal_instruction = "Grasp the red cube and place it into the green receptacle zone."
+    stop_event = threading.Event()
+
+    # -------------------------------------------------------------------------
+    # Asynchronous Cognitive Supervisory Loop (Cadence ~0.5-2 Hz)
+    # -------------------------------------------------------------------------
+    def supervisor_worker():
+        if not os.environ.get("GEMINI_API_KEY"):
+            return
+        try:
+            supervisor = CognitiveSupervisor()
+        except Exception as err:
+            print(f"[Supervisor] Init failed: {err}")
+            return
+
+        while not stop_event.is_set():
+            rgb_top, depth_map = arena.render_overhead_rgbd()
+            current_plan, _, _, _, _ = shared_plan_state.get_snapshot()
+            curr_subgoal = current_plan.sub_goal if current_plan else "initial"
+
+            try:
+                plan = supervisor.analyze_scene(rgb_top, goal_instruction, current_subgoal=curr_subgoal)
+                
+                # Unproject 2D box to metric 3D using calibrated camera geometry
+                ymin, xmin, ymax, xmax = plan.target_box_2d
+                u_center = int(np.clip((xmin + xmax) / 2000.0 * 640, 0, 639))
+                v_center = int(np.clip((ymin + ymax) / 2000.0 * 480, 0, 479))
+                d_val = float(depth_map[v_center, u_center])
+
+                target_3d = arena.cam_overhead.unproject_pixel_to_world(u_center, v_center, d_val, arena.data)
+                dest_3d = np.array([0.32, -0.15, 0.43])  # Target receptacle zone
+                subgoal_idx = SUBGOAL_MAP.get(plan.sub_goal, 0)
+
+                shared_plan_state.update(plan, target_3d, dest_3d, subgoal_idx)
+                print(f"[Supervisor Async] Subgoal: {plan.sub_goal} | Replan Needed: {plan.requires_replanning}")
+            except (InvalidDepthError, SupervisorAPIError) as err:
+                print(f"[Supervisor Async Error] {err}")
+
+            time.sleep(0.5)  # 2 Hz target cadence
+
+    supervisor_thread = threading.Thread(target=supervisor_worker, daemon=True)
+    if system_id in ["system_c", "system_d"]:
+        supervisor_thread.start()
+
+    # Initial default target for systems without supervisor
+    current_plan_version = 0
+    sim_steps = 250  # 5.0 seconds at 50 Hz control rate
 
     for step in range(sim_steps):
-        # 1. Cognitive Supervisory Check (1-2 Hz)
-        if step % 25 == 0:
-            rgb, depth = arena.render_obs()
-            if supervisor:
-                active_plan = supervisor.analyze_scene(
-                    rgb,
-                    goal,
-                    current_subgoal=active_plan.sub_goal if active_plan else "initial"
-                )
-                print(f"[{step*0.02:.2f}s] ER Subgoal: {active_plan.sub_goal} | Replan Needed: {active_plan.requires_replanning}")
+        t_sec = step * 0.02
+        proprio = arena.get_proprioception()
+        rgb_top, depth_top = arena.render_overhead_rgbd()
+        rgb_wrist = arena.render_wrist_rgb()
 
-                # Anomaly recovery trigger
-                if active_plan.requires_replanning and mode == "agentic_recovery":
-                    print("🔄 [Anomaly Recovery] Triggering dynamic trajectory replan...")
+        # Inject disturbance at t = 2.0s
+        if step == 100 and has_disturbance:
+            arena.apply_disturbance()
 
-        # 2. Inject disturbance at t = 2.0s
-        if step == 100 and "disturbance" in mode:
-            arena.apply_mid_trajectory_disturbance()
+        # Read latest asynchronous plan state without blocking control thread
+        plan, target_3d, dest_3d, subgoal_idx, plan_ver = shared_plan_state.get_snapshot()
 
-        # 3. Step low-level controller (50 Hz)
-        # In real benchmark, select between Classical IK target or policy.select_action()
-        mujoco.mj_step(arena.model, arena.data, nstep=10)
+        # Dynamic Recovery Queue Reset for System D
+        if system_id == "system_d" and plan is not None and plan_ver > current_plan_version:
+            current_plan_version = plan_ver
+            if plan.requires_replanning:
+                print(f"[{t_sec:.2f}s] 🔄 [Recovery] Anomaly detected! Resetting LeRobot action queue & replanning...")
+                policy_executor.reset()
 
-    print(f"Episode Completed for {mode}.")
+        # ---------------------------------------------------------------------
+        # 50 Hz Controller Dispatch
+        # ---------------------------------------------------------------------
+        if system_id == "oracle":
+            # Oracle: Ground-truth cube position from MuJoCo state -> DLS IK
+            gt_cube_pos = arena.get_cube_ground_truth_pos()
+            target_pose = gt_cube_pos + np.array([0.0, 0.0, 0.03])
+            grip = 0.02 if step < 80 else -0.015
+            action = ik_controller.solve_ik_step(target_pose, gripper_cmd=grip)
+
+        elif system_id == "system_a":
+            # System A: Classical RGB-D perception -> calibrated unprojection -> DLS IK
+            # Find red cube center via color thresholding
+            hsv = cv2.cvtColor(rgb_top, cv2.COLOR_RGB2HSV)
+            mask = cv2.inRange(hsv, np.array([0, 120, 70]), np.array([10, 255, 255]))
+            coords = np.argwhere(mask > 0)
+            if len(coords) > 10:
+                v_c, u_c = np.mean(coords, axis=0)
+                d_c = float(depth_top[int(v_c), int(u_c)])
+                try:
+                    p_target = arena.cam_overhead.unproject_pixel_to_world(u_c, v_c, d_c, arena.data)
+                except InvalidDepthError as err:
+                    print(f"[{t_sec:.2f}s] ⚠️ [System A INVALID_DEPTH] {err}")
+                    p_target = None
+            else:
+                p_target = None
+
+            if p_target is not None:
+                grip = 0.02 if step < 80 else -0.015
+                action = ik_controller.solve_ik_step(p_target, gripper_cmd=grip)
+            else:
+                action = proprio  # Hold safe pose on perception / invalid depth failure
+
+        elif system_id == "system_b":
+            # System B: Pure unconditioned ACT policy
+            action = policy_executor.select_action(rgb_top, rgb_wrist, proprio, goal_vector=None)
+
+        elif system_id in ["system_c", "system_d"]:
+            # System C & D: Goal-conditioned ACT policy
+            if target_3d is not None and dest_3d is not None:
+                subgoal_one_hot = np.zeros(5, dtype=np.float32)
+                subgoal_one_hot[subgoal_idx] = 1.0
+                goal_vec = np.concatenate([target_3d.astype(np.float32), dest_3d.astype(np.float32), subgoal_one_hot])
+            else:
+                goal_vec = np.zeros(11, dtype=np.float32)
+
+            action = policy_executor.select_action(rgb_top, rgb_wrist, proprio, goal_vector=goal_vec)
+
+        else:
+            action = proprio
+
+        # Advance physics
+        arena.step(action)
+
+    stop_event.set()
+    print(f"Benchmark Episode Completed for {system_id.upper()}.")
 
 if __name__ == "__main__":
-    run_benchmark_episode(mode="agentic_recovery")
+    run_benchmark_episode(system_id="system_d", has_disturbance=True)
 ```
 
 ---
 
 ## 7. Product-Grade Repository Architecture
 
-To establish an exceptional CV and portfolio asset that signals commercial engineering readiness to recruiters and researchers within 20 seconds, the codebase is structured as a modular product:
+To establish an exceptional portfolio asset that signals commercial engineering readiness within 20 seconds, the codebase is structured as a modular product:
 
 ```
 agentic-manipulation/
 ├── README.md                      # Problem -> Architecture -> 30s Video -> Benchmark Table -> Reproduction
 ├── pyproject.toml                 # Modern PEP 621 packaging with uv support
+├── uv.lock                        # Authoritative deterministic dependency lockfile
 ├── configs/                       # Hydra / YAML policy, environment & evaluation configs
 │   ├── act_default.yaml
 │   └── benchmark_shifts.yaml
 ├── src/
-│   └── agentic_manipulation/
-│       ├── environments/          # MuJoCo MJCF arenas, dual cameras, disturbance injection
+│   └── lerobot_agentic/
+│       ├── sim/                   # MuJoCo MJCF arenas, 6-DoF arm, dual cameras, disturbance injection
 │       ├── controllers/           # Classical baseline: SE(3) unprojection & Jacobian DLS IK
-│       ├── policies/              # LeRobot ACT and Diffusion wrappers with queue management
-│       ├── agents/                # Gemini Robotics ER 2 supervisor & closed-loop replanner
-│       └── evaluation/            # Trajectory jerk, success counters, latency benchmarks
+│       ├── policy/                # LeRobot ACT wrappers with PolicyProcessorPipeline & reset()
+│       ├── cognitive/             # Gemini Robotics ER 2 supervisor, thread-safe plan state & replanner
+│       └── utils/                 # Video recorder, telemetry HUD, scenario manifest logger
 ├── scripts/
 │   ├── record_dataset.py          # Harvester collecting 50 episodes in LeRobotDataset format
 │   ├── train_policy.py            # Local ACT training on RTX 3070 with PyTorch AMP
-│   ├── evaluate.py                # 4-system comparative evaluation CLI across 5 shifts
+│   ├── evaluate.py                # 5-system comparative evaluation CLI across 5 shifts
 │   └── record_hud_video.py        # Side-by-side dual-camera telemetry MP4 generator
 ├── tests/                         # Unit tests (Kinematics, EGL rendering, schemas, offline CV)
 ├── outputs/
-│   ├── benchmarks/                # Machine-readable evaluation outputs (eval_results.json, CSV)
+│   ├── benchmarks/                # Machine-readable evaluation outputs (eval_results.json, CSV, manifest)
+│   │   └── scenario_manifest.jsonl
 │   └── videos/                    # High-resolution H.264 benchmark rollout recordings
 ├── DATASET_CARD.md                # Hugging Face format dataset provenance, features, and metadata
 ├── MODEL_CARD.md                  # Policy weights, hyperparameters, loss curves, and limitations
@@ -584,48 +1024,125 @@ agentic-manipulation/
 
 ---
 
-## 8. Strategic 4-Phase Implementation Roadmap
+## 8. Strategic 5-Phase Implementation Roadmap & Frozen Architectural Contract
 
-The project is structured into **4 core phases** (complete in 4–6 weeks for an exchange project), ensuring that all essential research-engineering goals are met before any optional stretch work begins:
+The roadmap incorporates a preliminary **Gate 0** to lock dependencies and verify hardware before algorithmic development begins:
 
 ```mermaid
-gantt
-    title 4-Phase Agile Exchange Implementation Schedule
-    dateFormat  YYYY-MM-DD
-    section Phase 1: Foundation
-    MuJoCo dual-cam arena & EGL rendering         :done, p1_1, 2026-09-08, 4d
-    Classical SE(3) unprojection & Jacobian IK    :active, p1_2, after p1_1, 4d
-    section Phase 2: Robot Learning
-    LeRobotDataset v3 synthetic harvester (50 eps): p2_1, after p1_2, 5d
-    Local ACT policy training on RTX 3070         : p2_2, after p2_1, 4d
-    section Phase 3: Agentic Supervisory Tier
-    Gemini Robotics ER 2 spatial grounding schemas: p3_1, after p2_2, 4d
-    Online progress monitoring & recovery loop    : p3_2, after p3_1, 4d
-    section Phase 4: Research Benchmarking
-    Comparative benchmark (4 systems x 5 shifts) : p4_1, after p3_2, 5d
-    Telemetry HUD video & Productized Repo polish : p4_2, after p4_1, 4d
+flowchart LR
+    subgraph G0 ["Gate 0: Environment & Harness (Week 1)"]
+        direction TB
+        G0_1["Python 3.12 & uv.lock Build"] --> G0_2["RTX 3070 VRAM & EGL Smoke Test"]
+    end
+
+    subgraph P1 ["Phase 1: Foundation (Weeks 1–2)"]
+        direction TB
+        P1_1["Dual-Cam 6-DoF MuJoCo Arena"] --> P1_2["Oracle & Classical RGB-D IK Baselines"]
+    end
+
+    subgraph P2 ["Phase 2: Robot Learning (Weeks 2–3)"]
+        direction TB
+        P2_1["Synthetic Harvester (50 eps)"] --> P2_2["Goal-Conditioned ACT Training (RTX 3070)"]
+    end
+
+    subgraph P3 ["Phase 3: Supervisory Tier (Weeks 3–4)"]
+        direction TB
+        P3_1["Async Gemini ER 2 & Shared Plan State"] --> P3_2["Online Anomaly Verification & Queue Reset"]
+    end
+
+    subgraph P4 ["Phase 4: Research Benchmarking (Weeks 4–5)"]
+        direction TB
+        P4_1["Comparative Benchmark (5 Systems x 5 Shifts)"] --> P4_2["Telemetry HUD & Portfolio Polish"]
+    end
+
+    G0 --> P1 --> P2 --> P3 --> P4
 ```
 
-### Phase 1: Robotics Foundation & Kinematics Baseline (Weeks 1–2)
-* Establish dual-camera MuJoCo arena (`overhead_cam` + `wrist_cam`).
-* Implement and unit test the analytical 3D unprojection and MuJoCo Jacobian Damped Least Squares IK controller.
-* Verify deterministic reset, domain randomization bounds, and headless EGL rendering.
+### Gate 0: Reproducible Environment & Verification Harness (Week 1)
+* [ ] Python 3.12 environment builds deterministically from locked specification (`uv.lock`).
+* [ ] CUDA acceleration verified on RTX 3070 (`torch.cuda.is_available() == True`).
+* [ ] MuJoCo EGL headless rendering produces valid RGB and depth buffers for both cameras.
+* [ ] Hugging Face `lerobot` imports without deprecation warnings.
+* [ ] LeRobot `PolicyProcessorPipeline` (preprocessor $\to$ policy $\to$ postprocessor) smoke test passes.
+* [ ] One dummy forward pass of `ACTPolicy` executes within the RTX 3070 memory envelope ($<5.5\,\text{GB}$).
+* [ ] Gemini Robotics ER 2 API call succeeds with `gemini-robotics-er-2-preview`.
+* [ ] Schema validation passes with application-level spatial checks (`validate_box`).
+* [ ] Unit test suite passes 100% (`pytest tests/`).
+
+### Phase 1: Robotics Foundation & Kinematics Baselines (Weeks 1–2)
+* Establish dual-camera MuJoCo arena (`overhead_cam` + in-hand `wrist_cam` on `gripper_base`).
+* Implement and unit test the analytical 3D unprojection and MuJoCo Jacobian DLS IK controller on the 6-DoF arm.
+* Verify Oracle baseline (ground-truth state $\to$ IK) and System A baseline (RGB-D segmentation $\to$ IK).
 
 ### Phase 2: Robot Learning & Imitation Pipeline (Weeks 2–3)
 * Construct an algorithmic oracle to record 50 validated pick-and-place episodes.
-* Stream episodes into standard `LeRobotDataset` format with synchronized MP4 video and joint trajectories.
-* Train local ACT policy (`ACTPolicy`) on the NVIDIA RTX 3070 (8GB) using PyTorch mixed precision (`torch.cuda.amp`), verifying convergence in $<1\,\text{hour}$.
+* Stream episodes into standard `LeRobotDataset v3.0` format with synchronized MP4 video, joint trajectories, and goal vectors $\mathbf{g}_t$.
+* Train local ACT policy (`ACTPolicy`) on RTX 3070 using PyTorch mixed precision (`torch.cuda.amp`), logging `peak_vram_mb` and verifying convergence in $<1\,\text{hour}$.
 
 ### Phase 3: Agentic Supervisory Tier & Anomaly Recovery (Weeks 3–4)
 * Connect Google `gemini-robotics-er-2-preview` to provide structured spatial grounding (`SpatialGroundingPlan`).
-* Build local OpenCV HSV affordance detector as an offline test fallback.
-* Implement closed-loop anomaly detection: when an object slips or is perturbed, the supervisor detects the failure and issues a dynamic recovery subgoal.
+* Build thread-safe `AtomicPlanState` decoupling the asynchronous supervisor loop (~0.5–2 Hz) from the 50 Hz execution loop.
+* Implement closed-loop anomaly detection: when an object slips or is perturbed, the supervisor flags `requires_replanning=True`, triggering `policy.reset()` and dynamic replanning.
 
 ### Phase 4: Research Benchmarking & Productized Portfolio (Weeks 4–5)
-* Execute the full comparative benchmark across the 4 systems and 5 distribution shifts ($N=20$ episodes per condition).
-* Generate machine-readable benchmark reports (`eval_results.json` and CSV summaries).
+* Execute the full comparative benchmark across all 5 systems and 5 distribution shifts ($N=20$ paired seeds per condition).
+* Generate machine-readable benchmark reports (`eval_results.json`, CSV summaries, and `scenario_manifest.jsonl`).
+* Calculate Wilson 95% Score CIs for success proportions and bootstrap CIs for continuous metrics.
 * Render split-screen telemetry HUD videos (`[Overhead Cam | Wrist Cam]` with live joint jerk, active subgoal, and state indicators).
 * Finalize `DATASET_CARD.md`, `MODEL_CARD.md`, and `REPORT.md`.
+
+---
+
+### Recommended Frozen Research & Architectural Contract
+
+```
+NATURAL LANGUAGE TASK
+        │
+        ▼
+Google Gemini Robotics ER 2 (Async Supervisory Loop, ~0.5–2 Hz)
+        │ Target 2D Point / Subgoal / Progress Status
+        ▼
+ATOMIC PLAN STATE (Thread-Safe Shared Memory)
+        │
+        ├─────────────────────────────────────────────────┐
+        │                                                 │
+        ▼                                                 ▼
+System A: Classical RGB-D Pipeline                System C/D: Goal-Conditioned ACT
+- Local Color/Mask Segmentation                   - Dual RGB: Overhead + In-Hand Wrist
+- Calibrated Ray Unprojection (INVALID_DEPTH)     - Proprioception (7-DoF)
+- MuJoCo 6-DoF Jacobian DLS IK                    - Goal Conditioning Vector g_t in R^11
+        │                                         - LeRobot PolicyProcessorPipeline
+        │                                                 │
+        └────────────────────────┬────────────────────────┘
+                                 │
+                                 ▼
+                    MuJoCo 6-DoF Arm + Gripper
+                                 │
+                                 │ 50 Hz Control Rate (dt=20ms)
+                                 │ Multi-Camera Observations
+                                 ▼
+                     Gemini Online Verification
+                                 │
+                                 ├── [Nominal] -> Continue Execution
+                                 │
+                                 └── [Disturbance Detected]
+                                         │
+                                         ▼
+                                  Update Goal State
+                                         │
+                                         ▼
+                                  Reset ACT Queue (policy.reset())
+                                         │
+                                         ▼
+                                  Execute Recovery Replan
+```
+
+#### Final Benchmark Scope Matrix
+1. **Oracle:** Ground-truth simulation state $\to$ Jacobian DLS IK $\to$ PD (Kinematic Upper Bound)
+2. **System A:** Classical RGB-D vision $\to$ Calibrated 3D unprojection $\to$ Jacobian DLS IK $\to$ PD
+3. **System B:** Pure Visuomotor ACT (Dual RGB + Proprioception, unconditioned)
+4. **System C:** Agentic ACT (Gemini Robotics ER 2 async supervisory grounding $\to$ goal vector $\mathbf{g}_t \to$ ACT)
+5. **System D:** Agentic ACT + Closed-Loop Online Anomaly Recovery (`policy.reset()` queue flushing upon replanning)
 
 ### Optional Stretch & Future Scope (Post-Phase 4)
 * **Stretch Goal 1:** SmolVLA (450M) inference and evaluation comparison against ACT.

@@ -142,9 +142,9 @@ The evaluation harness measures closed-loop policy performance across a battery 
    Standard benchmark timeout is capped at $T = 250$ steps ($5.0\,\text{s}$).
 
 4. **Joint Jerk Smoothness Metric ($\mathcal{J}$)**:
-   Measures trajectory smoothness and mechanical wear on hardware:
+   Proxy for motion smoothness and aggressive actuator-command variation:
    $$\mathcal{J} = \frac{1}{T} \sum_{t=1}^{T} \left\| \dddot{\mathbf{q}}_t \right\|_2^2 \approx \frac{1}{T} \sum_{t=2}^{T-1} \left\| \frac{\mathbf{q}_{t+1} - 3\mathbf{q}_t + 3\mathbf{q}_{t-1} - \mathbf{q}_{t-2}}{\Delta t^3} \right\|_2^2$$
-   Lower jerk indicates absence of chunk boundary shudder and stable temporal ensembling.
+   Lower jerk indicates absence of chunk boundary shudder and stable temporal ensembling. (Direct mechanical wear/stress assessment requires physical motor current/torque instrumentation on hardware).
 
 ---
 

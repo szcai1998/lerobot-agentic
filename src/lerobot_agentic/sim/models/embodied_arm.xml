@@ -1,0 +1,80 @@
+<mujoco model="embodied_arm">
+    <compiler angle="radian" coordinate="local"/>
+    <option gravity="0 0 -9.81" timestep="0.002" integrator="implicitfast"/>
+    <visual>
+        <global offwidth="640" offheight="480"/>
+    </visual>
+    
+    <asset>
+        <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+        <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2"/>
+        <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2"/>
+    </asset>
+
+    <worldbody>
+        <light directional="true" pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
+        <geom name="floor" type="plane" size="1.2 1.2 0.1" material="grid"/>
+        <geom name="table" type="box" pos="0.3 0 0.2" size="0.4 0.5 0.2" rgba="0.85 0.85 0.88 1"/>
+        
+        <!-- Robot Arm Base & Kinematic Chain: qpos[0:6] = joints 1..6, qpos[6] = gripper -->
+        <body name="base" pos="0 0 0.4">
+            <geom name="base_link" type="cylinder" size="0.06 0.02" rgba="0.25 0.25 0.28 1"/>
+            <body name="link1" pos="0 0 0.04">
+                <joint name="joint1" type="hinge" axis="0 0 1" range="-3.1416 3.1416" damping="1.5" armature="0.05"/>
+                <geom name="l1" type="capsule" fromto="0 0 0 0 0 0.1" size="0.035" rgba="0.2 0.45 0.75 1" mass="0.8"/>
+                <body name="link2" pos="0 0 0.1">
+                    <joint name="joint2" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="1.5" armature="0.05"/>
+                    <geom name="l2" type="capsule" fromto="0 0 0 0 0 0.16" size="0.03" rgba="0.2 0.45 0.75 1" mass="0.6"/>
+                    <body name="link3" pos="0 0 0.16">
+                        <joint name="joint3" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="1.0" armature="0.03"/>
+                        <geom name="l3" type="capsule" fromto="0 0 0 0 0 0.16" size="0.025" rgba="0.2 0.45 0.75 1" mass="0.4"/>
+                        <body name="gripper_base" pos="0 0 0.16">
+                            <joint name="joint4" type="hinge" axis="0 0 1" range="-3.1416 3.1416" damping="0.5" armature="0.02"/>
+                            <joint name="joint5" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.5" armature="0.02"/>
+                            <joint name="joint6" type="hinge" axis="1 0 0" range="-3.1416 3.1416" damping="0.5" armature="0.02"/>
+                            <geom name="palm" type="box" size="0.025 0.035 0.015" rgba="0.15 0.15 0.18 1" mass="0.2"/>
+                            
+                            <!-- End-Effector Site for Kinematics / IK -->
+                            <site name="ee_site" pos="0 0 0.04" size="0.008" rgba="0 1 0 1"/>
+                            <!-- In-Hand Wrist Camera Attached to Gripper -->
+                            <camera name="wrist_cam" pos="0 0.035 0.02" euler="0 0.5 1.5708"/>
+                            
+                            <!-- Parallel Gripper -->
+                            <body name="finger_left" pos="0 0.025 0.035">
+                                <joint name="finger_joint1" type="slide" axis="0 1 0" range="-0.025 0.025" damping="0.5" armature="0.01"/>
+                                <geom name="f1" type="box" size="0.006 0.006 0.025" rgba="0.9 0.75 0.1 1" mass="0.05" friction="1.5 0.01 0.001"/>
+                            </body>
+                            <body name="finger_right" pos="0 -0.025 0.035">
+                                <geom name="f2" type="box" size="0.006 0.006 0.025" rgba="0.9 0.75 0.1 1" mass="0.05" friction="1.5 0.01 0.001"/>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+
+        <!-- Target Manipuland Cube (Freejoint at qpos[7:14]) -->
+        <body name="target_cube" pos="0.32 0.05 0.43">
+            <freejoint name="cube_joint"/>
+            <geom name="cube_geom" type="box" size="0.022 0.022 0.022" rgba="0.92 0.15 0.15 1" mass="0.05" friction="1.2 0.005 0.0001"/>
+        </body>
+
+        <!-- Receptacle Target Zone -->
+        <body name="target_zone" pos="0.32 -0.15 0.401">
+            <geom name="zone_marker" type="cylinder" size="0.06 0.002" rgba="0.1 0.8 0.2 0.6"/>
+        </body>
+
+        <!-- Cameras -->
+        <camera name="overhead_cam" pos="0.65 0 0.9" euler="0 0.75 1.5708"/>
+    </worldbody>
+
+    <actuator>
+        <position name="act_j1" joint="joint1" kp="60"/>
+        <position name="act_j2" joint="joint2" kp="60"/>
+        <position name="act_j3" joint="joint3" kp="50"/>
+        <position name="act_j4" joint="joint4" kp="30"/>
+        <position name="act_j5" joint="joint5" kp="30"/>
+        <position name="act_j6" joint="joint6" kp="30"/>
+        <position name="act_gripper" joint="finger_joint1" kp="30"/>
+    </actuator>
+</mujoco>
