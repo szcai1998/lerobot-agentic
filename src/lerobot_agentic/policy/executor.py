@@ -58,6 +58,14 @@ class VisuomotorPolicyExecutor:
         self.preprocessor = None
         self.postprocessor = None
 
+        # Telemetry and invariant tracking
+        self.control_steps = 0
+        self.inference_count = 0
+        self.reset_count = 0
+        self.fallback_count = 0
+        self.last_batch_keys: list[str] = []
+        self.last_env_state_shape: tuple[int, ...] | None = None
+
         if pretrained_policy_path and os.path.exists(pretrained_policy_path):
             try:
                 from lerobot.policies.act import ACTPolicy
@@ -85,6 +93,7 @@ class VisuomotorPolicyExecutor:
 
     def reset(self):
         """Flushes any cached action chunk queue in the policy during replanning."""
+        self.reset_count += 1
         if self.policy is not None and hasattr(self.policy, "reset"):
             self.policy.reset()
 
@@ -144,9 +153,25 @@ class VisuomotorPolicyExecutor:
         Executes single 50 Hz control step following the LeRobot 0.6+ PolicyProcessorPipeline:
         raw MuJoCo obs -> env processor -> policy preprocessor -> ACT select_action() -> postprocessor -> action adapter.
         """
+        self.control_steps += 1
         if self.policy is not None:
+            # Check if this step requires fresh neural network forward pass
+            is_new_inference = False
+            if hasattr(self.policy, "_action_queue"):
+                is_new_inference = (len(self.policy._action_queue) == 0)
+            elif getattr(self.policy.config, "temporal_ensemble_coeff", None) is not None:
+                is_new_inference = True
+
+            if is_new_inference:
+                self.inference_count += 1
+
             # 1. Environment Processor
             batch = self.environment_processor(rgb_top, proprioception, rgb_wrist, goal_vector)
+            self.last_batch_keys = list(batch.keys())
+            if "observation.environment_state" in batch:
+                self.last_env_state_shape = tuple(batch["observation.environment_state"].shape)
+            else:
+                self.last_env_state_shape = None
 
             # 2. LeRobot Policy Preprocessor (externalized normalization & batching)
             if self.preprocessor is not None:
@@ -170,8 +195,12 @@ class VisuomotorPolicyExecutor:
                 processed_action = raw_action
 
             # 5. Environment / Action Adapter
-            return self.environment_action_adapter(processed_action)
+            action = self.environment_action_adapter(processed_action)
+            if not np.all(np.isfinite(action)):
+                raise ValueError(f"Policy emitted non-finite action: {action}")
+            return action
 
+        self.fallback_count += 1
         return proprioception
 
     def predict_action_chunk(

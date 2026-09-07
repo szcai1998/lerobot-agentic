@@ -7,6 +7,7 @@ from lerobot_agentic.cognitive.schemas import SpatialGroundingPlan
 from lerobot_agentic.utils.metrics import (
     ScenarioManifestLogger,
     bootstrap_ci,
+    compute_joint_and_gripper_jerk,
     compute_trajectory_jerk,
     wilson_score_interval,
 )
@@ -43,6 +44,13 @@ def test_compute_trajectory_jerk():
     dyn_traj = np.sin(2 * np.pi * t) * np.ones((20, 7))
     jerk_dyn = compute_trajectory_jerk(dyn_traj, dt=0.02)
     assert jerk_dyn > 0.0
+
+    # Test unit-separated jerk
+    jerk_dict = compute_joint_and_gripper_jerk(dyn_traj, dt=0.02)
+    assert "arm_joint_jerk_rms_rad_s3" in jerk_dict
+    assert "gripper_jerk_rms_m_s3" in jerk_dict
+    assert jerk_dict["arm_joint_jerk_rms_rad_s3"] > 0.0
+    assert jerk_dict["gripper_jerk_rms_m_s3"] > 0.0
 
 
 def test_scenario_manifest_logger(tmp_path):

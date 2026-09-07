@@ -7,10 +7,13 @@ on nominal demonstration datasets targeting the NVIDIA RTX 3070 8GB VRAM envelop
 """
 
 import argparse
+import hashlib
 import json
 import math
 import random
+import subprocess
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -125,6 +128,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def compute_file_sha256(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(8192):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def get_git_commit() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except (subprocess.SubprocessError, OSError):
+        return "unknown"
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -133,11 +153,27 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def save_checkpoint(policy: ACTPolicy, preprocessor, postprocessor, save_dir: Path):
+def seed_worker(worker_id: int):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def save_checkpoint(
+    policy: ACTPolicy,
+    preprocessor,
+    postprocessor,
+    save_dir: Path,
+    manifest: dict | None = None,
+):
     save_dir.mkdir(parents=True, exist_ok=True)
     policy.save_pretrained(save_dir)
     preprocessor.save_pretrained(save_dir)
     postprocessor.save_pretrained(save_dir)
+    if manifest is not None:
+        manifest_file = save_dir / "run_manifest.json"
+        with open(manifest_file, "w") as f:
+            json.dump(manifest, f, indent=2, default=str)
 
 
 def evaluate_offline(policy: ACTPolicy, val_loader: DataLoader, preprocessor, device: torch.device) -> dict[str, float]:
@@ -205,6 +241,9 @@ def main():
     print(f"  ✓ Train frames: {train_dataset.num_frames:,} across {train_dataset.num_episodes} episodes")
     print(f"  ✓ Val frames:   {val_dataset.num_frames:,} across {val_dataset.num_episodes} episodes")
 
+    dl_generator = torch.Generator()
+    dl_generator.manual_seed(args.seed)
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -212,6 +251,8 @@ def main():
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
         drop_last=True,
+        worker_init_fn=seed_worker,
+        generator=dl_generator,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -274,6 +315,54 @@ def main():
 
     total_params = sum(p.numel() for p in policy.parameters())
     print(f"  ✓ Model initialized: {total_params:,} parameters (Backbone: shared ResNet-18)")
+
+    # Construct and save run_manifest.json
+    run_manifest = {
+        "policy_type": args.policy_type,
+        "training_seed": args.seed,
+        "git_commit": get_git_commit(),
+        "uv_lock_sha256": compute_file_sha256(Path("uv.lock")),
+        "dataset_manifest": {
+            "train": {
+                "dir": str(train_dir),
+                "num_episodes": train_dataset.num_episodes,
+                "num_frames": train_dataset.num_frames,
+            },
+            "val": {
+                "dir": str(val_dir),
+                "num_episodes": val_dataset.num_episodes,
+                "num_frames": val_dataset.num_frames,
+            },
+        },
+        "environment": {
+            "torch_version": torch.__version__,
+            "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
+            "device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+        },
+        "act_config": asdict(policy_cfg),
+        "optimizer": {
+            "type": "AdamW",
+            "lr": args.lr,
+            "backbone_lr": args.backbone_lr,
+            "weight_decay": args.weight_decay,
+        },
+        "scheduler": {
+            "type": "CosineAnnealingWithLinearWarmup",
+            "warmup_steps": args.warmup_steps,
+            "total_steps": args.steps,
+            "min_lr_ratio": 0.01,
+        },
+        "training_parameters": {
+            "micro_batch_size": args.batch_size,
+            "grad_accum_steps": args.grad_accum,
+            "effective_batch_size": args.batch_size * args.grad_accum,
+            "total_updates": args.steps,
+            "amp_dtype": "float16",
+        },
+    }
+    with open(output_dir / "run_manifest.json", "w") as f:
+        json.dump(run_manifest, f, indent=2, default=str)
+    print(f"  ✓ Persisted run manifest to {output_dir / 'run_manifest.json'}")
 
     # 3. Optimizer & Learning Rate Schedule
     optimizer = torch.optim.AdamW(
@@ -347,8 +436,8 @@ def main():
                 "step": step_count,
                 "epoch": epoch,
                 "train_total_loss": round(accum_loss, 4),
-                "train_l1_loss": round(accum_l1, 4),
-                "train_kld_loss": round(accum_kld, 4),
+                "train_l1": round(accum_l1, 4),
+                "train_kld": round(accum_kld, 4),
                 "grad_norm": round(float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm), 4),
                 "lr": round(current_lr, 7),
                 "peak_vram_mb": round(peak_vram_mb, 1),
@@ -370,12 +459,12 @@ def main():
         accum_l1 = 0.0
         accum_kld = 0.0
 
-        # Offline Validation
+        # Offline Validation (Deployment prior z=0)
         if step_count % args.eval_freq == 0:
             print(f"\n📊 Running Offline Validation at Step {step_count}...")
             val_metrics = evaluate_offline(policy, val_loader, preprocessor, device)
             val_prior_l1 = val_metrics["val_prior_l1"]
-            print(f"  ✓ Val Prior-Mean L1: {val_prior_l1:.4f}")
+            print(f"  ✓ Val Prior-Mean L1 (z=0): {val_prior_l1:.4f}")
 
             val_log = {
                 "step": step_count,
@@ -388,18 +477,18 @@ def main():
             if val_prior_l1 < best_val_l1:
                 best_val_l1 = val_prior_l1
                 best_dir = output_dir / "best_offline"
-                save_checkpoint(policy, preprocessor, postprocessor, best_dir)
+                save_checkpoint(policy, preprocessor, postprocessor, best_dir, manifest=run_manifest)
                 print(f"  ⭐ New best validation prior L1 ({best_val_l1:.4f})! Saved to {best_dir}")
 
         # Periodic Checkpoint Saving
         if step_count % args.save_freq == 0:
             step_dir = output_dir / f"checkpoint_step_{step_count}"
-            save_checkpoint(policy, preprocessor, postprocessor, step_dir)
+            save_checkpoint(policy, preprocessor, postprocessor, step_dir, manifest=run_manifest)
             print(f"  💾 Saved periodic checkpoint to {step_dir}")
 
     # Final Checkpoint
     final_dir = output_dir / "final"
-    save_checkpoint(policy, preprocessor, postprocessor, final_dir)
+    save_checkpoint(policy, preprocessor, postprocessor, final_dir, manifest=run_manifest)
     print("\n" + "=" * 80)
     print(f"✅ Training Complete! Checkpoints saved to: {output_dir}")
     print(f"  • Final checkpoint:        {final_dir}")

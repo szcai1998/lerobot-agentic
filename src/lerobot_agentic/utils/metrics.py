@@ -70,6 +70,42 @@ def compute_trajectory_jerk(q_traj: np.ndarray, dt: float = 0.02) -> float:
     return float(np.mean(jerk_norms))
 
 
+def compute_joint_and_gripper_jerk(q_traj: np.ndarray, dt: float = 0.02) -> dict[str, float]:
+    """
+    Computes RMS trajectory jerk with strict unit separation:
+    - Arm joints 1..6 (revolute): rad/s^3
+    - Gripper joint 7 (prismatic): m/s^3
+    q_traj: (T, 7) array where columns 0..5 are arm revolute angles (rad)
+            and column 6 is prismatic gripper position (m).
+    """
+    q = np.asarray(q_traj)
+    if len(q) < 4:
+        return {
+            "arm_joint_jerk_rms_rad_s3": 0.0,
+            "gripper_jerk_rms_m_s3": 0.0,
+        }
+
+    # 3rd central-difference approximation: (q[t+3] - 3q[t+2] + 3q[t+1] - q[t]) / dt^3
+    jerk = (q[3:] - 3.0 * q[2:-1] + 3.0 * q[1:-2] - q[:-3]) / (dt ** 3)
+
+    # 1. Arm revolute joints (indices 0..5): Frobenius norm across joints, RMS over time
+    arm_jerk_slice = jerk[:, :6]
+    arm_jerk_norms = np.linalg.norm(arm_jerk_slice, axis=1)
+    arm_rms = float(np.sqrt(np.mean(arm_jerk_norms ** 2)))
+
+    # 2. Gripper prismatic finger (index 6): RMS over time
+    if q.shape[1] > 6:
+        gripper_jerk = jerk[:, 6]
+        gripper_rms = float(np.sqrt(np.mean(gripper_jerk ** 2)))
+    else:
+        gripper_rms = 0.0
+
+    return {
+        "arm_joint_jerk_rms_rad_s3": round(arm_rms, 2),
+        "gripper_jerk_rms_m_s3": round(gripper_rms, 4),
+    }
+
+
 class ScenarioManifestLogger:
     """
     Logs complete scenario provenance records to scenario_manifest.jsonl for reproducibility.

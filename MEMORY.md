@@ -80,8 +80,16 @@ This file records the current project status, active hardware profile, verified 
    - Exact parameter delta: 7,680 ($7,168$ for `Linear(13, 512)` + $512$ for the 1D positional embedding table expansion).
    - Memory profile on RTX 3070 8GB: 3,242.3 MB peak VRAM at micro-batch 8 + grad accum 2 (effective batch size 16), leaving ~4.95 GB headroom.
    - Normalization: `VISUAL -> MEAN_STD`, `STATE -> MEAN_STD`, `ACTION -> MEAN_STD`, `ENV -> IDENTITY` (protects against variance collapse on zero-frequency recovery primitive).
-   - 100-step smoke tests completed cleanly for both `act-b` and `act-g`, validating loss decrease, gradient scaling, and checkpoint saving.
-   - Non-privileged evaluation: `ObservableGoalProvider` in `scripts/eval_policy.py` provides RGB-D unprojected goal snapshots for ACT-G rollouts with zero privileged simulator leakage.
+   - Provenance tracking: `run_manifest.json` persisted beside each checkpoint capturing git commit, `uv.lock` sha256, dataset hashes/metadata, PyTorch/CUDA versions, ACTConfig, optimizer, and scheduler settings.
+   - Deterministic seeding: `--seed 42` enforced across Python, NumPy, PyTorch CPU/CUDA, and DataLoader generator/workers.
+   - Preflight smoke tests passed independently for both `smoke_act_b` and `smoke_act_g`:
+     - `policy.reset()` called and verified at episode reset.
+     - Predicted actions strictly finite and within clipped actuator limits (arm $\pm 3.14159$, gripper $[-0.025, 0.025]$).
+     - Zero fallback/identity action paths used (`fallback_count == 0`).
+     - ACT-B receives no `environment_state`; ACT-G receives exactly `(13,)` `environment_state`.
+     - Control steps to inference count ratio verified at exactly **10.0:1** (10 steps per chunk query).
+     - Trajectory jerk units separated: arm revolute joints in $\text{rad/s}^3$ and gripper prismatic slide in $\text{m/s}^3$.
+     - Canonical subgoals aligned strictly to policy vocabulary (`reach`, `grasp`, `lift`, `transport`, `place`, `retreat`, `recover`).
 
 ---
 
@@ -99,15 +107,17 @@ This file records the current project status, active hardware profile, verified 
 
 ## 5. Current Task & Next Actionable Steps
 
-1. **Dual ACT Training Pipeline & Invariant Test Suite Complete ✅:**
-   - Implemented `scripts/train_policy.py` supporting `--policy-type {act-b, act-g}`, AMP FP16, parameter-grouped optimizer (10x lower backbone LR), and cosine annealing.
-   - Implemented `scripts/eval_policy.py` with `ObservableGoalProvider`, Wilson Score 95% CI, and HUD video export.
-   - Built `tests/test_policy_training.py` verifying exact parameter counts, delta 7,680, queue depletion over 10 steps, `policy.reset()`, and AMP training steps (25/25 tests passing).
-   - Executed 100-step smoke tests for both ACT-B and ACT-G with ~3.8 GB peak VRAM on RTX 3070.
+1. **Phase 2 Part 2 Preflight Complete & Verified ✅:**
+   - Preflight training CLI tested with `run_manifest.json` generation and deterministic data loading.
+   - Closed-loop rollout preflight independently executed and verified for both `smoke_act_b` and `smoke_act_g`.
+   - All 6 deployment invariants logged and asserted (finite actions, actuator clipping, zero fallback, strict conditioning schemas, 10.0:1 control/inference ratio).
+   - Test suite passing 100% (25/25 unit tests) and linting 100% clean (`ruff check .`).
 
 2. **Immediate Next Step:**
-   - Launch production 10,000-step training runs:
-     - `outputs/checkpoints/act_b_nominal_v1/`
-     - `outputs/checkpoints/act_g_nominal_v1/`
-   - Run closed-loop MuJoCo rollout evaluation across validation seeds 2000–2009.
+   - Production 10,000-step training runs frozen and ready to execute on local or remote server:
+     ```bash
+     python scripts/train_policy.py --policy-type act-b --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_b_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2 --eval-freq 1000 --save-freq 2000 --seed 42
+     python scripts/train_policy.py --policy-type act-g --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_g_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2 --eval-freq 1000 --save-freq 2000 --seed 42
+     ```
+   - Rollout benchmark on held-out seeds 2000–2009 once checkpoints are trained.
 

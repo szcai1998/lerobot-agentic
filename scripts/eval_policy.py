@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from lerobot_agentic.controllers.ik import ClassicalIKController
 from lerobot_agentic.policy.executor import VisuomotorPolicyExecutor
 from lerobot_agentic.sim.env import MuJoCoRobotEnv
-from lerobot_agentic.utils.metrics import compute_trajectory_jerk
+from lerobot_agentic.utils.metrics import compute_joint_and_gripper_jerk
 
 
 def compute_wilson_score_ci(successes: int, total: int, confidence: float = 0.95) -> tuple[float, float]:
@@ -51,14 +51,15 @@ class ObservableGoalProvider:
     Non-privileged goal snapshot provider for Phase 2 validation of ACT-G.
     Extracts target position via raw overhead RGB-D unprojection (CameraGeometry)
     and canonical subgoal one-hot via deterministic 7-stage Pick-and-Place FSM.
+    Canonical vocabulary: reach, grasp, lift, transport, place, retreat, recover.
     Zero privileged state leakage.
     """
     def __init__(self, model, data, receptacle_pos: np.ndarray | None = None):
         self.controller = ClassicalIKController(model, data, receptacle_pos=receptacle_pos)
 
-    def get_goal(self, obs: dict) -> np.ndarray:
+    def get_goal(self, obs: dict) -> tuple[np.ndarray, str]:
         step = self.controller.act(obs)
-        return step.goal_snapshot
+        return step.goal_snapshot, step.canonical_subgoal
 
 
 def parse_args():
@@ -163,8 +164,16 @@ def main():
         seed = args.seed_start + ep_idx
         _obs = env.reset(seed=seed, include_depth=True)
 
-        # Invariant: Flush any residual action chunk queue at episode reset
+        # Invariant 1: Flush any residual action chunk queue at episode reset
+        initial_reset_count = executor.reset_count
         executor.reset()
+        assert executor.reset_count == initial_reset_count + 1, "executor.reset() must increment reset_count"
+        if hasattr(executor.policy, "_action_queue"):
+            assert len(executor.policy._action_queue) == 0, "Action queue must be empty after policy.reset()"
+
+        initial_inferences = executor.inference_count
+        initial_control_steps = executor.control_steps
+        visited_subgoals: list[str] = []
 
         goal_provider = ObservableGoalProvider(env.model, env.data, receptacle_pos=dest_pos) if use_goal_provider else None
 
@@ -180,10 +189,16 @@ def main():
 
         for step_t in range(args.max_steps):
             obs_current = env.get_observation(include_depth=True)
-            joint_history.append(obs_current["proprioception"][:6].copy())
+            joint_history.append(obs_current["proprioception"][:7].copy())
 
-            # Obtain non-privileged goal snapshot if required
-            goal_vector = goal_provider.get_goal(obs_current) if goal_provider is not None else None
+            # Obtain non-privileged goal snapshot and canonical subgoal if required
+            if goal_provider is not None:
+                goal_vector, canonical_subgoal = goal_provider.get_goal(obs_current)
+                if not visited_subgoals or visited_subgoals[-1] != canonical_subgoal:
+                    visited_subgoals.append(canonical_subgoal)
+            else:
+                goal_vector = None
+                canonical_subgoal = None
 
             # Policy inference & receding-horizon step
             action = executor.select_action(
@@ -192,6 +207,19 @@ def main():
                 rgb_wrist=obs_current["rgb_wrist"],
                 goal_vector=goal_vector,
             )
+
+            # Invariant 2: Actions must be finite
+            assert np.all(np.isfinite(action)), f"Non-finite action emitted at step {step_t}: {action}"
+
+            # Invariant 3: Actions must respect clipped actuator limits
+            assert np.all(action[:6] >= -3.15) and np.all(action[:6] <= 3.15), f"Arm action out of bounds: {action[:6]}"
+            assert -0.026 <= action[6] <= 0.026, f"Gripper action out of bounds: {action[6]}"
+
+            # Invariant 4: Conditioning feature assertions
+            if expects_goal:
+                assert executor.last_env_state_shape == (13,), f"ACT-G must receive exactly (13,) environment_state, got {executor.last_env_state_shape}"
+            else:
+                assert "observation.environment_state" not in executor.last_batch_keys, f"ACT-B must receive no environment_state, got keys: {executor.last_batch_keys}"
 
             # Step physical environment
             _next_obs, _reward, done, _info = env.step(action)
@@ -216,12 +244,13 @@ def main():
             if args.render_video:
                 hud_frame = obs_current["rgb"].copy()
                 hud_frame = cv2.cvtColor(hud_frame, cv2.COLOR_RGB2BGR)
+                sg_text = f" | SG: {canonical_subgoal}" if canonical_subgoal else ""
                 cv2.putText(
                     hud_frame,
-                    f"Ep {ep_idx} | Seed {seed} | Step {step_t:3d} | Slip: {max_grasp_slip*1000:.1f}mm",
+                    f"Ep {ep_idx} | Seed {seed} | Step {step_t:3d}{sg_text} | Slip: {max_grasp_slip*1000:.1f}mm",
                     (15, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
+                    0.55,
                     (255, 255, 255),
                     2,
                 )
@@ -231,6 +260,13 @@ def main():
                 terminal_reason = "env_terminal"
                 break
 
+        # Invariant 5: No fallback action path used
+        assert executor.fallback_count == 0, f"Fallback action path was used {executor.fallback_count} times!"
+
+        ep_control_steps = executor.control_steps - initial_control_steps
+        ep_inferences = executor.inference_count - initial_inferences
+        step_inference_ratio = ep_control_steps / max(1, ep_inferences)
+
         # Final placement distance evaluation
         final_cube_pos = env.get_cube_position()
         dist_to_dest = float(np.linalg.norm(final_cube_pos - dest_pos))
@@ -239,8 +275,10 @@ def main():
         if is_success:
             successes += 1
 
-        # Trajectory jerk computation
-        jerk = float(compute_trajectory_jerk(np.array(joint_history), dt=0.02)) if len(joint_history) >= 4 else 0.0
+        # Trajectory jerk computation (Separated: Arm rad/s^3, Gripper m/s^3)
+        jerk_dict = compute_joint_and_gripper_jerk(np.array(joint_history), dt=0.02)
+        arm_jerk = jerk_dict["arm_joint_jerk_rms_rad_s3"]
+        gripper_jerk = jerk_dict["gripper_jerk_rms_m_s3"]
 
         ep_result = {
             "episode": ep_idx,
@@ -251,7 +289,12 @@ def main():
             "final_distance_mm": round(dist_to_dest * 1000.0, 2),
             "max_slip_mm": round(max_grasp_slip * 1000.0, 2),
             "peak_force_N": round(peak_force, 2),
-            "jerk": round(jerk, 2),
+            "arm_joint_jerk_rms_rad_s3": arm_jerk,
+            "gripper_jerk_rms_m_s3": gripper_jerk,
+            "control_steps": ep_control_steps,
+            "inferences": ep_inferences,
+            "control_step_inference_ratio": round(step_inference_ratio, 2),
+            "subgoals_traversed": visited_subgoals,
             "terminal_reason": terminal_reason,
         }
         results.append(ep_result)
@@ -267,10 +310,11 @@ def main():
             out.release()
 
         status_sym = "✅ PASS" if is_success else "❌ FAIL"
+        sg_str = f" | Subgoals: {','.join(visited_subgoals)}" if visited_subgoals else ""
         print(
             f"[{ep_idx+1:2d}/{args.episodes:2d}] Seed {seed} | {status_sym} | "
-            f"Steps: {step_t+1:3d} ({(step_t+1)*0.02:4.1f}s) | "
-            f"Dist: {dist_to_dest*1000.0:5.1f}mm | Slip: {max_grasp_slip*1000.0:5.1f}mm | Jerk: {jerk:5.1f}"
+            f"Steps: {step_t+1:3d} (Inferences: {ep_inferences:2d}, Ratio: {step_inference_ratio:4.1f}:1){sg_str} | "
+            f"Dist: {dist_to_dest*1000.0:5.1f}mm | Arm Jerk: {arm_jerk:5.1f} rad/s^3 | Grip Jerk: {gripper_jerk:.4f} m/s^3"
         )
 
     # Summary Statistics & Wilson Score CI
@@ -279,7 +323,8 @@ def main():
 
     distances = [r["final_distance_mm"] for r in results]
     slips = [r["max_slip_mm"] for r in results]
-    jerks = [r["jerk"] for r in results]
+    arm_jerks = [r["arm_joint_jerk_rms_rad_s3"] for r in results]
+    gripper_jerks = [r["gripper_jerk_rms_m_s3"] for r in results]
 
     summary = {
         "policy_path": str(policy_path),
@@ -298,9 +343,18 @@ def main():
             "mean": round(float(np.mean(slips)), 2),
             "max": round(float(np.max(slips)), 2),
         },
-        "jerk": {
-            "mean": round(float(np.mean(jerks)), 2),
-            "max": round(float(np.max(jerks)), 2),
+        "arm_joint_jerk_rms_rad_s3": {
+            "mean": round(float(np.mean(arm_jerks)), 2),
+            "max": round(float(np.max(arm_jerks)), 2),
+        },
+        "gripper_jerk_rms_m_s3": {
+            "mean": round(float(np.mean(gripper_jerks)), 4),
+            "max": round(float(np.max(gripper_jerks)), 4),
+        },
+        "inference_telemetry": {
+            "mean_control_to_inference_ratio": round(float(np.mean([r["control_step_inference_ratio"] for r in results])), 2),
+            "total_control_steps": sum(r["control_steps"] for r in results),
+            "total_inferences": sum(r["inferences"] for r in results),
         },
         "episodes": results,
     }
@@ -315,7 +369,9 @@ def main():
     print(f"• Success Rate:             {success_rate:.1f}% (Wilson 95% CI: [{ci_low*100:.1f}%, {ci_high*100:.1f}%])")
     print(f"• Mean Placement Distance:  {np.mean(distances):.2f} mm (Max: {np.max(distances):.2f} mm)")
     print(f"• Mean Relative Grasp Slip: {np.mean(slips):.2f} mm (Max: {np.max(slips):.2f} mm)")
-    print(f"• Mean Trajectory Jerk:     {np.mean(jerks):.2f}")
+    print(f"• Mean Arm Joint Jerk:      {np.mean(arm_jerks):.2f} rad/s^3")
+    print(f"• Mean Gripper Jerk:        {np.mean(gripper_jerks):.4f} m/s^3")
+    print(f"• Mean Ctrl/Inf Ratio:      {summary['inference_telemetry']['mean_control_to_inference_ratio']:.1f}:1")
     print(f"• Summary JSON:             {summary_file}")
     print("=" * 80)
 
