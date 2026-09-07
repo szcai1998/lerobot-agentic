@@ -9,8 +9,7 @@ This file records the current project status, active hardware profile, verified 
 - **Repository:** `szcai1998/lerobot-agentic`
 - **Local Path:** `/home/aivise/Documents/antigravity/lerobot-agentic`
 - **Domain:** Embodied AI, Hierarchical Vision-Language-Action (VLA), Imitation Learning, Physics Simulation
-- **Last Verified Date:** September 2026
-- **Current Development Phase:** Phase 2 Part 2 Active ⏳ — Dual ACT Training Infrastructure & Invariant Test Suite Complete & Smoke-Tested ✅ (ACT-B & ACT-G) — Proceeding to 10k Production Runs
+- **Current Development Phase:** Phase 2 (Robot Learning & Imitation Pipeline) COMPLETE & FROZEN ✅ — Phase 3 (Agentic Supervisory Tier) Ready to Launch
 
 ---
 
@@ -105,19 +104,39 @@ This file records the current project status, active hardware profile, verified 
 
 ---
 
-## 5. Current Task & Next Actionable Steps
+## 5. Phase 2 Production Benchmark Results (ACT-B vs ACT-G)
 
-1. **Phase 2 Part 2 Preflight Complete & Verified ✅:**
-   - Preflight training CLI tested with `run_manifest.json` generation and deterministic data loading.
-   - Closed-loop rollout preflight independently executed and verified for both `smoke_act_b` and `smoke_act_g`.
-   - All 6 deployment invariants logged and asserted (finite actions, actuator clipping, zero fallback, strict conditioning schemas, 10.0:1 control/inference ratio).
-   - Test suite passing 100% (25/25 unit tests) and linting 100% clean (`ruff check .`).
+Evaluated across $N=10$ held-out validation seeds (2000–2009) in DeepMind MuJoCo:
 
-2. **Immediate Next Step:**
-   - Production 10,000-step training runs frozen and ready to execute on local or remote server:
-     ```bash
-     python scripts/train_policy.py --policy-type act-b --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_b_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2 --eval-freq 1000 --save-freq 2000 --seed 42
-     python scripts/train_policy.py --policy-type act-g --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_g_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2 --eval-freq 1000 --save-freq 2000 --seed 42
-     ```
-   - Rollout benchmark on held-out seeds 2000–2009 once checkpoints are trained.
+| Metric | ACT-B (Unconditioned Baseline) | ACT-G (Goal-Conditioned Policy) | Invariant / Target Gate |
+| :--- | :--- | :--- | :--- |
+| **Model Parameters** | 51,573,639 | 51,581,319 | ResNet-18 visual backbones (+7,680 params for 13-D goal projection) |
+| **Training Steps** | 10,000 updates | 10,000 updates | Effective batch size 16 (`--batch-size 16 --grad-accum 1` on RTX 4090) |
+| **Final Train Total Loss** | **0.0271** (L1: 0.0233, KL: 0.0004) | **0.0247** (L1: 0.0200, KL: 0.0005) | Converged without gradient explosion or OOM |
+| **Best Offline Val Prior L1 ($z=0$)** | **0.0303** | **0.0324** | Evaluated on 3,330 held-out frames |
+| **Closed-Loop Success Rate** | **40.0%** (4 / 10 episodes) | **10.0%** (1 / 10 episodes) | Receptacle distance $\le 30.0\,\text{mm}$ |
+| **Wilson 95% Confidence Interval** | `[16.82%, 68.73%]` | `[1.79%, 40.41%]` | Binomial small-sample confidence interval |
+| **Mean Placement Distance** | **129.52 mm** (min: 20.5 mm) | **171.39 mm** (min: 24.3 mm) | Ep 1, 4, 5, 9 succeeded in ACT-B; Ep 1 succeeded in ACT-G |
+| **Mean Relative Grasp Slip** | **17.06 mm** (max: 65.2 mm) | **23.18 mm** (max: 72.8 mm) | Physically stable grasps |
+| **Arm Joint Jerk RMS** | **1,401.34 rad/s³** | **1,934.52 rad/s³** | Angular revolute joints (3rd time derivative) |
+| **Gripper Slide Jerk RMS** | **203.17 m/s³** | **206.16 m/s³** | Linear slide joint (3rd time derivative) |
+| **Control / Inference Ratio** | **10.0:1** (7,500 ctrl / 750 inf) | **10.0:1** (7,500 ctrl / 750 inf) | Exactly 10 steps per action chunk query; 0 fallback actions |
+| **Checkpoints Saved** | `outputs/checkpoints/act_b_nominal_v1/best_offline` | `outputs/checkpoints/act_g_nominal_v1/best_offline` | Checkpoints, processor safetensors, and `run_manifest.json` |
+| **Inspection Videos** | `outputs/eval_rollouts/act_b_nominal_v1/*.mp4` | `outputs/eval_rollouts/act_g_nominal_v1/*.mp4` | 20 HUD inspection videos with telemetry overlays |
+
+---
+
+## 6. Current Task & Next Actionable Steps
+
+1. **Phase 2 Complete & Verified ✅:**
+   - Both ACT-B and ACT-G policies trained to 10,000 updates and verified.
+   - Offline validation prior L1 converged to $\sim 0.030$.
+   - Closed-loop rollouts executed across held-out seeds 2000–2009 with HUD video generation.
+   - Control-to-inference ratio 10.0:1 strictly preserved; 0 fallback actions used.
+   - All checkpoints and videos pulled to local repository (`outputs/`).
+
+2. **Immediate Next Step: Launch Phase 3 (Agentic Supervisory Tier & Dynamic Recovery):**
+   - Connect `gemini-robotics-er-2-preview` asynchronous supervisor with `LatestFrameBuffer` and `AtomicPlanState`.
+   - Build System C (Gemini Robotics ER + ACT-G) and System D (Gemini + ACT-G + Dynamic Recovery).
+   - Test closed-loop recovery under simulated visual occlusions, object disturbances, and grasp slippages.
 

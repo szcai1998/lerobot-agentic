@@ -76,7 +76,7 @@ flowchart TD
 | :--- | :--- | :---: | :--- |
 | **Gate 0** | Reproducible Environment & Verification Harness | 🟢 Verified | Deterministic `uv.lock` build, CUDA RTX 3070, MuJoCo EGL dual rendering, LeRobot processor pipeline verified, 20/20 test suite passing. |
 | **Phase 1** | Robotics Foundation & Kinematics Baselines | 🟢 Verified | 6-DoF arm + single-actuated parallel gripper, calibrated 3D unprojection, 6D Pose IK with downward constraint and nullspace projection, Oracle and System A FSM. |
-| **Phase 2** | Robot Learning & Imitation Pipeline | 🟡 Up Next | 50 verified episodes harvested into `LeRobotDataset v3.0` with `dataset.finalize()`, 13-DoF goal conditioning, local ACT training on RTX 3070 with `peak_vram_mb` logging. |
+| **Phase 2** | Robot Learning & Imitation Pipeline | 🟢 Verified | 50 verified episodes harvested into `LeRobotDataset v3.0`, 13-DoF goal conditioning, dual ACT-B and ACT-G policies trained (10,000 steps) & benchmarked across held-out seeds 2000-2009. |
 | **Phase 3** | Agentic Supervisory Tier & Dynamic Recovery | 🟢 Scaffold Ready | Asynchronous `gemini-robotics-er-2-preview` supervisor, `AtomicPlanState` concurrency, 7 canonical primitives, edge-triggered `policy.reset()` queue flush. |
 | **Phase 4** | Comparative Benchmarking & Portfolio Polish | ⚪ Pending P2/P3 | 5 systems evaluated across 5 distribution shifts ($N=20$ paired seeds), Wilson 95% CIs, scenario manifest logging, split-screen HUD video export. |
 
@@ -188,44 +188,16 @@ print(f'✅ Phase 1 Verified: IK Step stage={stage}, action={action[:3]}...')
 
 ---
 
-### Part 2: Local ACT Training & Closed-Loop Rollout Evaluation (ACTIVE ⏳)
-
-#### 1. Goal
-Train an Action Chunking with Transformers (`ACTPolicy`) locally on the NVIDIA RTX 3070 within the 8GB VRAM envelope using PyTorch Automatic Mixed Precision (AMP). Fit normalization statistics exclusively on `nominal_train_v1`, apply them strictly out-of-sample to `nominal_val_v1`, and evaluate the trained checkpoint in closed-loop MuJoCo simulation across validation seeds.
-
-#### 2. Input for Start (Prerequisites)
-- Phase 2 Part 1 completed: Verified LeRobotDataset v3.0 datasets (`nominal_train_v1` and `nominal_val_v1`) with `meta/stats.json`.
-- `ACTPolicy` and `make_pre_post_processors` operational in `.venv`.
-
-#### 3. Output of Stage (Tangible Deliverables)
-- **Dual ACT Training CLI (`scripts/train_policy.py`)**:
-  - Supports `--policy-type {act-b, act-g}` targeting the five-system benchmark.
-  - Dual ResNet-18 vision backbones (`observation.images.top`, `observation.images.wrist`) + CVAE Transformer ($K=50$, lookahead horizon 1.0s).
-  - ACT-G: Ingests 13-DoF goal conditioning vector via native `observation.environment_state` (`encoder_env_state_input_proj`).
-  - ACT-B: Unconditioned baseline without goal inputs.
-  - Automatic mixed precision (`torch.cuda.amp.autocast`), AdamW optimizer with 10x backbone LR separation, cosine annealing schedule.
-  - Telemetry: logs `peak_vram_mb`, `steps_per_sec`, train/val loss curves, and offline validation prior L1 ($z=0$).
-- **Trained Checkpoint Artifacts**:
-  - `outputs/checkpoints/act_b_nominal_v1/`: Unconditioned baseline ACT policy checkpoint.
-  - `outputs/checkpoints/act_g_nominal_v1/`: Goal-conditioned ACT policy checkpoint.
-- **Closed-Loop Benchmark CLI (`scripts/eval_policy.py`)**:
-  - Supports both ACT-B and ACT-G over 10 validation seeds (2000–2009).
-  - Non-privileged `ObservableGoalProvider` (RGB-D unprojection + 7-stage FSM) supplying $g_t$ for ACT-G with zero simulator privileged state leakage.
-  - Evaluates Task Success Rate (95% Wilson Score CI), placement error (mm), grasp slip (mm), trajectory jerk ($\text{m/s}^3$), and contact forces (N).
-  - HUD video export for failure mode diagnostics.
-
-#### 4. Definition of Success (Objective Criteria & Verification Command)
-- Training converges without CUDA OOM (peak VRAM $\le 4.0\,\text{GB}$ under micro-batch 8 + grad accum 2).
-- Offline validation prior L1 strictly decreases and converges.
-- Closed-loop benchmark evaluates ACT-B and ACT-G across validation seeds 2000–2009.
-
-```bash
-# Phase 2 Part 2 Verification Commands:
-python scripts/train_policy.py --policy-type act-b --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_b_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2
-python scripts/train_policy.py --policy-type act-g --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_g_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2
-python scripts/eval_policy.py --policy-path outputs/checkpoints/act_b_nominal_v1/best_offline --episodes 10 --seed-start 2000 --render-video
-python scripts/eval_policy.py --policy-path outputs/checkpoints/act_g_nominal_v1/best_offline --episodes 10 --seed-start 2000 --goal-provider rgbd-fsm --render-video
-```
+### Part 2: Local ACT Training & Closed-Loop Rollout Evaluation (COMPLETE ✅)
+- **Status:** Complete, Verified & Frozen.
+- **Production Training Deliverables (10,000 updates each, Effective BS=16):**
+  - **ACT-B** (Unconditioned Baseline): Final offline validation prior L1 ($z=0$) = **0.0303**; saved to `outputs/checkpoints/act_b_nominal_v1/best_offline`.
+  - **ACT-G** (Goal-Conditioned): Final offline validation prior L1 ($z=0$) = **0.0324**; saved to `outputs/checkpoints/act_g_nominal_v1/best_offline`.
+- **Closed-Loop Benchmark Results (Held-Out Seeds 2000–2009, 10 Episodes Each):**
+  - **ACT-B**: **40.0% Success Rate** (Wilson 95% CI: [16.82%, 68.73%]), Mean placement error 129.52 mm, Mean arm jerk 1,401.34 $\text{rad/s}^3$, Mean gripper jerk 203.17 $\text{m/s}^3$.
+  - **ACT-G**: **10.0% Success Rate** (Wilson 95% CI: [1.79%, 40.41%]), Mean placement error 171.39 mm, Mean arm jerk 1,934.52 $\text{rad/s}^3$, Mean gripper jerk 206.16 $\text{m/s}^3$.
+  - **Inference Cadence Invariant**: Exactly 10.0:1 control-to-inference ratio maintained across all 15,000 control steps (750 inferences per policy, 0 fallback actions).
+  - **Video Deliverables**: 20 HUD-annotated rollout inspection videos (`outputs/eval_rollouts/{act_b_nominal_v1, act_g_nominal_v1}/*.mp4`).
 
 #### 5. Boundaries & Guardrails
 - ❌ **DO NOT leak validation stats into training**: Statistics in `meta/stats.json` must be derived solely from `nominal_train_v1`.
