@@ -104,11 +104,11 @@ class VisuomotorPolicyExecutor:
         The LeRobot preprocessor pipeline owns batching (via AddBatchDimensionProcessorStep).
         """
         batch = {
-            "observation.images.top": torch.from_numpy(rgb_top).permute(2, 0, 1).to(self.device),
+            "observation.images.top": (torch.from_numpy(rgb_top).permute(2, 0, 1).float() / 255.0).to(self.device),
             "observation.state": torch.from_numpy(proprioception).float().to(self.device),
         }
         if rgb_wrist is not None:
-            batch["observation.images.wrist"] = torch.from_numpy(rgb_wrist).permute(2, 0, 1).to(self.device)
+            batch["observation.images.wrist"] = (torch.from_numpy(rgb_wrist).permute(2, 0, 1).float() / 255.0).to(self.device)
         if goal_vector is not None:
             # Stock LeRobot ACT consumes 13-DoF environment state via FeatureType.ENV
             batch["observation.environment_state"] = torch.from_numpy(goal_vector).float().to(self.device)

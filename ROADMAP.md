@@ -175,56 +175,63 @@ print(f'✅ Phase 1 Verified: IK Step stage={stage}, action={action[:3]}...')
 
 ## 📦 Phase 2: Robot Learning & Imitation Pipeline
 
-### 1. Goal
-Collect 50 high-quality expert pick-and-place demonstration episodes into the official **Hugging Face `LeRobotDataset` v3.0** format with explicit `dataset.finalize()` lifecycle management, construct the **13-DoF goal conditioning vector**, and train an Action Chunking with Transformers (`ACTPolicy`) locally on the NVIDIA RTX 3070 within the 8GB VRAM envelope.
+### Part 1: Demonstration Harvesting, Scientific Sanity Audit & HUD Inspection (COMPLETE ✅)
+- **Status:** Complete & Scientifically Audited.
+- **Harvested Datasets:**
+  - `data/nominal_train_v1`: 50 accepted episodes, 16,137 frames @ 50 Hz (SHA-256: `cb87518895af95a9527f8cd49c56b59f86f8d81dd683a46ab658dde7b6b2f09d`).
+  - `data/nominal_val_v1`: 10 accepted episodes, 3,232 frames @ 50 Hz (SHA-256: `e5a4d447d1aecc302d5280074ac910503fbde9efab483e565c3aaf5a5b1501e5`).
+- **Verified Invariants:**
+  - Zero privileged-state leakage into policy conditioning: target position derived strictly from RGB-D unprojection (`CameraGeometry`).
+  - Physical gates: Receptacle distance mean 9.7mm (100% $\le 30.0\,\text{mm}$), grasp slip mean 20.3mm (max 44.85mm $\le 55.0\,\text{mm}$), peak normal force mean 9.8N (max 14.1N $\le 30.0\,\text{N}$).
+  - Scientific sanity audits: 0 NaNs/Infs, 0 PyAV decoding errors across boundaries, 0.0% joint saturation.
+  - HUD inspection video: `outputs/dataset_inspection/inspection_ep0.mp4`.
 
-### 2. Input for Start (Prerequisites)
-- Phase 1 completed: Oracle controller verified to achieve 100% pick-and-place success.
-- `LeRobotDataset` and `ACTPolicy` available in active `.venv`.
+---
 
-### 3. Output of Stage (Tangible Deliverables)
-- **Demonstration Harvester CLI (`scripts/record_dataset.py`)**:
-  - Executes 50 Oracle rollouts with paired seed randomization.
-  - Generates synchronized chunked H.264 MP4 videos (`observation.images.top`, `observation.images.wrist`), proprioception `observation.state` (7-DoF), and 13-DoF goal conditioning vector `observation.environment_state`.
-  - Invokes `dataset.finalize()` to construct global indices, video manifests, and dataset-wide normalization statistics (`meta/stats.json`).
-- **Dataset Artifact (`data/lerobot_embodied_arm/`)**:
-  - 50 validated episodes in standard LeRobotDataset v3.0 format.
-- **Local ACT Training Script (`scripts/train_policy.py`)**:
-  - Dual ResNet-18 vision backbones + CVAE Transformer ($K=50$, lookahead horizon 1.0s).
-  - Ingests `observation.environment_state` via native `encoder_env_state_input_proj`.
-  - Automatic mixed precision (`torch.cuda.amp`), AdamW optimizer, cosine annealing schedule.
-  - Logs `peak_vram_mb`, `steps_per_second`, and training loss curves.
-- **Trained Checkpoint Artifact (`outputs/checkpoints/act_embodied_arm/`)**:
-  - SafeTensors checkpoint containing model weights, pre/post processor configurations, and statistics.
+### Part 2: Local ACT Training & Closed-Loop Rollout Evaluation (ACTIVE ⏳)
 
-### 4. Definition of Success (Objective Criteria & Verification Command)
-- `scripts/record_dataset.py` records 50 consecutive valid episodes without corruption.
-- `dataset.finalize()` generates valid `meta/stats.json` and `meta/info.json`.
-- Policy training converges without CUDA OOM (peak VRAM $<5.5\,	ext{GB}$).
-- Restored `GoalConditionedACTPolicyExecutor` loads checkpoint via `make_pre_post_processors` and executes dummy forward pass.
+#### 1. Goal
+Train an Action Chunking with Transformers (`ACTPolicy`) locally on the NVIDIA RTX 3070 within the 8GB VRAM envelope using PyTorch Automatic Mixed Precision (AMP). Fit normalization statistics exclusively on `nominal_train_v1`, apply them strictly out-of-sample to `nominal_val_v1`, and evaluate the trained checkpoint in closed-loop MuJoCo simulation across validation seeds.
+
+#### 2. Input for Start (Prerequisites)
+- Phase 2 Part 1 completed: Verified LeRobotDataset v3.0 datasets (`nominal_train_v1` and `nominal_val_v1`) with `meta/stats.json`.
+- `ACTPolicy` and `make_pre_post_processors` operational in `.venv`.
+
+#### 3. Output of Stage (Tangible Deliverables)
+- **Dual ACT Training CLI (`scripts/train_policy.py`)**:
+  - Supports `--policy-type {act-b, act-g}` targeting the five-system benchmark.
+  - Dual ResNet-18 vision backbones (`observation.images.top`, `observation.images.wrist`) + CVAE Transformer ($K=50$, lookahead horizon 1.0s).
+  - ACT-G: Ingests 13-DoF goal conditioning vector via native `observation.environment_state` (`encoder_env_state_input_proj`).
+  - ACT-B: Unconditioned baseline without goal inputs.
+  - Automatic mixed precision (`torch.cuda.amp.autocast`), AdamW optimizer with 10x backbone LR separation, cosine annealing schedule.
+  - Telemetry: logs `peak_vram_mb`, `steps_per_sec`, train/val loss curves, and offline validation prior L1 ($z=0$).
+- **Trained Checkpoint Artifacts**:
+  - `outputs/checkpoints/act_b_nominal_v1/`: Unconditioned baseline ACT policy checkpoint.
+  - `outputs/checkpoints/act_g_nominal_v1/`: Goal-conditioned ACT policy checkpoint.
+- **Closed-Loop Benchmark CLI (`scripts/eval_policy.py`)**:
+  - Supports both ACT-B and ACT-G over 10 validation seeds (2000–2009).
+  - Non-privileged `ObservableGoalProvider` (RGB-D unprojection + 7-stage FSM) supplying $g_t$ for ACT-G with zero simulator privileged state leakage.
+  - Evaluates Task Success Rate (95% Wilson Score CI), placement error (mm), grasp slip (mm), trajectory jerk ($\text{m/s}^3$), and contact forces (N).
+  - HUD video export for failure mode diagnostics.
+
+#### 4. Definition of Success (Objective Criteria & Verification Command)
+- Training converges without CUDA OOM (peak VRAM $\le 4.0\,\text{GB}$ under micro-batch 8 + grad accum 2).
+- Offline validation prior L1 strictly decreases and converges.
+- Closed-loop benchmark evaluates ACT-B and ACT-G across validation seeds 2000–2009.
 
 ```bash
-# Phase 2 Verification Command:
-python scripts/record_dataset.py --episodes 50 --output-dir data/lerobot_embodied_arm
-python scripts/train_policy.py --dataset-dir data/lerobot_embodied_arm --steps 5000 --batch-size 16 --device cuda
-python -c "
-import numpy as np
-from lerobot_agentic.policy.executor import GoalConditionedACTPolicyExecutor
-executor = GoalConditionedACTPolicyExecutor(pretrained_policy_path='outputs/checkpoints/act_embodied_arm')
-obs_top = np.zeros((480, 640, 3), dtype=np.uint8)
-obs_wrist = np.zeros((480, 640, 3), dtype=np.uint8)
-proprio = np.zeros(7, dtype=np.float32)
-goal_vec = np.zeros(13, dtype=np.float32)
-action = executor.select_action(obs_top, obs_wrist, proprio, goal_vector=goal_vec)
-assert action.shape == (7,)
-print('✅ Phase 2 Verified: Pre/post processor pipeline restored and action emitted successfully!')
-"
+# Phase 2 Part 2 Verification Commands:
+python scripts/train_policy.py --policy-type act-b --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_b_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2
+python scripts/train_policy.py --policy-type act-g --dataset-dir data/nominal_train_v1 --val-dataset-dir data/nominal_val_v1 --output-dir outputs/checkpoints/act_g_nominal_v1 --steps 10000 --batch-size 8 --grad-accum 2
+python scripts/eval_policy.py --policy-path outputs/checkpoints/act_b_nominal_v1/best_offline --episodes 10 --seed-start 2000 --render-video
+python scripts/eval_policy.py --policy-path outputs/checkpoints/act_g_nominal_v1/best_offline --episodes 10 --seed-start 2000 --goal-provider rgbd-fsm --render-video
 ```
 
-### 5. Boundaries & Guardrails
+#### 5. Boundaries & Guardrails
+- ❌ **DO NOT leak validation stats into training**: Statistics in `meta/stats.json` must be derived solely from `nominal_train_v1`.
+- ❌ **DO NOT leak privileged simulation state**: In evaluation, $g_t$ must be generated from observable perception (`ObservableGoalProvider`), not ground truth simulator object poses.
+- ❌ **DO NOT exceed 8GB VRAM**: Micro-batch size $\le 8$, dual ResNet-18 backbones, AMP enabled.
 - ❌ **DO NOT batch tensors at the environment boundary**: Emit unbatched `(3, H, W)`, `(7,)`, `(13,)` tensors so LeRobot's `AddBatchDimensionProcessorStep` owns batching.
-- ❌ **DO NOT exceed 8GB VRAM**: Keep batch size $\le 16$ and backbone to ResNet-18.
-- ❌ **DO NOT omit dataset.finalize()**: Unfinalized v3.0 datasets cannot be read by LeRobot data loaders.
 
 ---
 
