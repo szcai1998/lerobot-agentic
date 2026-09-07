@@ -34,16 +34,18 @@ def is_process_running(pid: int) -> bool:
 def find_running_training_job(policy_type: str) -> int | None:
     try:
         output = subprocess.check_output(
-            ["pgrep", "-af", f"scripts/train_policy.py.*--policy-type {policy_type}"],
+            ["pgrep", "-f", f"scripts/train_policy.py.*--policy-type {policy_type}"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
         for line in output.strip().splitlines():
-            parts = line.split(maxsplit=1)
-            if len(parts) >= 2:
+            parts = line.split()
+            if parts:
                 pid = int(parts[0])
                 if pid != os.getpid():
-                    return pid
+                    comm_file = Path(f"/proc/{pid}/comm")
+                    if comm_file.is_file() and "python" in comm_file.read_text().lower():
+                        return pid
     except (subprocess.SubprocessError, OSError):
         pass
     return None
