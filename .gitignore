@@ -71,3 +71,4 @@ htmlcov/
 *~
 MUJOCO_LOG.TXT
 .env
+.git_commit

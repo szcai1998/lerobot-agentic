@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import random
 import subprocess
 import time
@@ -139,8 +140,23 @@ def compute_file_sha256(path: Path) -> str | None:
 
 
 def get_git_commit() -> str:
+    # 1. Check baked commit file (useful for remote workers without .git)
+    commit_file = Path(".git_commit")
+    if commit_file.is_file():
+        commit = commit_file.read_text().strip()
+        if commit:
+            return commit
+    # 2. Check environment variable
+    env_commit = os.environ.get("GIT_COMMIT")
+    if env_commit:
+        return env_commit.strip()
+    # 3. Query git repository directly
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except (subprocess.SubprocessError, OSError):
         return "unknown"
 
