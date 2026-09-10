@@ -36,21 +36,29 @@ creep past this line during Phases 1–4 should be pushed to a later phase.
 
 ---
 
-## Phase 1: Canonical Data Models & Interface Contracts
+## Phase 1: Canonical Data Models & Interface Contracts *(done — 2026-09-10)*
 
 **Goal**: Establish pure, typed contracts with 0% circular dependencies and 100% test coverage.
 
-- [ ] **Data Models** (`src/lerobot_reliability/data_types.py`):
+- [x] **Data Models** (`src/lerobot_reliability/data_types.py`), frozen slotted dataclasses:
   - `CanonicalObservation` (named camera views, depth, proprioception, instruction).
-  - `CanonicalActionView` & `ExecutableAction` (strict non-invertibility design).
-  - `ExecutionHistory` (bounded rolling buffer).
-  - `FailureEstimate`, `RecoveryProposal`, `RecoveryCost`, `AchievementResult`.
-- [ ] **Protocols** (`src/lerobot_reliability/protocols/`):
-  - `PolicyAdapter` & `PolicyCapabilities`.
-  - `RuntimeBenchmarkAdapter` vs. `EvaluationOracle` (hard privileged separation).
-  - `FailureDetector`, `RecoveryExpert`, `AchievementVerifier`, `ExecutionMemory`.
-- [ ] **Contract Tests** (`tests/test_contracts.py`):
-  - Verify type safety, serialization, and protocol conformances.
+  - `CanonicalActionView` & `ExecutableAction` + `build_executable_action()` /
+    `NativeReconstructionNotSupported` (fail-closed non-invertibility guard).
+  - `ExecutionHistory` / `HistoryStep` / `RuntimeEvent` (bounded rolling buffer).
+  - `FailureEstimate`, `RecoveryProposal`, `RecoveryCost`, `AchievementSpec`,
+    `AchievementResult` (`"uncertain"` is first-class), `PolicyCapabilities`,
+    `PolicyManifest`, `PolicyOutput`, `StepResult`.
+- [x] **Protocols** (`src/lerobot_reliability/protocols/`), `@runtime_checkable`:
+  - `PolicyAdapter` & `PolicyCapabilities` (`protocols/policy.py`).
+  - `RuntimeBenchmarkAdapter` vs. `EvaluationOracle` — separate protocols, disjoint
+    method sets, no cross-satisfaction (`protocols/benchmark.py`).
+  - `FailureDetector`, `RecoveryExpert` (+ `RecoveryState`/`RuntimeContext`/
+    `RecoveryExecution`), `AchievementVerifier`, `ExecutionMemory` (+ `MemoryRecord`).
+- [x] **Contract Tests** (`tests/test_contracts.py`): frozen-ness, `asdict` plain-tree
+  serialization, the reconstruction guard, runtime/oracle disjointness, protocol
+  conformance of minimal stubs, and the `protocols -> data_types` dependency direction.
+- [x] Array policy fixed: canonical arrays are `numpy.ndarray`; adapters convert to
+  framework tensors at their own edge. `py.typed` marker added.
 
 ---
 
