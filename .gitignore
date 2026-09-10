@@ -45,15 +45,14 @@ datasets/
 *.hdf5
 
 # Media Outputs & Visualizations
+# Generated media lives under these dirs; committed doc/diagram assets (e.g.
+# docs/**/*.png) are intentionally NOT ignored globally.
 outputs/
 videos/
 recordings/
 renders/
 *.mp4
 *.avi
-*.gif
-*.png
-*.jpg
 
 # Logs & Profiling
 logs/

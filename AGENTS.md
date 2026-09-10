@@ -1,6 +1,6 @@
-# AGENTS.md: Development & Operational Constitution for `lerobot-agentic`
+# AGENTS.md: Development & Operational Constitution for `lerobot-reliability`
 
-> Universal operational constitution, behavioral constraints, robotics engineering rules, and verification standards for autonomous AI coding agents in `lerobot-agentic`.
+> Universal operational constitution, behavioral constraints, robotics engineering rules, and verification standards for autonomous AI coding agents in `lerobot-reliability`.
 
 ---
 
@@ -23,7 +23,7 @@ Coding agents suffer from a "defaults problem": a systemic bias to barrel ahead,
 ### Rule 3: Surgical Edits & Living Documentation
 * **Strict Minimal Blast Radius**: Touch ONLY lines strictly necessary to satisfy the request. Every edit must be directly traceable to the user's instruction.
 * **Zero Unsolicited Renovations**: NEVER reformat untouched lines, reorganize folder structures, clean up whitespace in adjacent functions, or refactor unrelated code.
-* **Synchronous Documentation Sync**: Whenever you add, modify, or deprecate public interfaces, API routes, CLI flags, or environment variables, you MUST update the corresponding documentation (`README.md`, `ARCHITECTURE.md`, `MEMORY.md`, `.env.example`) in the exact same PR. Prevent doc drift.
+* **Synchronous Documentation Sync**: Whenever you add, modify, or deprecate public interfaces, API routes, CLI flags, or environment variables, you MUST update the corresponding documentation (`README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `MEMORY.md`, `.env.example`) in the exact same PR. Prevent doc drift.
 * **Preserve Documentation**: Retain all existing comments and docstrings. Clean up only the temporary logs, variables, or imports that *your* changes introduced or orphaned.
 
 ### Rule 4: Reproduction-First, Anti-Flailing & Invariant Tests
@@ -39,22 +39,22 @@ Coding agents suffer from a "defaults problem": a systemic bias to barrel ahead,
 
 ---
 
-## 3. Package Manager & Dependency Discipline
+## 2. Package Manager & Dependency Discipline
 
 * **Deterministic Dependency Tooling**: Use `uv` exclusively for package management in `.venv`:
   - Install core and dev dependencies: `uv pip install -e ".[lerobot,dev]"`
   - Package listings: `uv pip list`
-* **Python 3.11 Compatibility**: Ensure all Hugging Face `lerobot` dependencies remain compatible with the active Python 3.11 environment (`lerobot>=0.4.0,<0.6.0`).
+* **Python 3.12 Compatibility**: Ensure all Hugging Face `lerobot` dependencies remain compatible with the active Python 3.12 environment (`lerobot==0.6.1`).
 * **Zero Global Pollution**: Never run global `pip install` or `sudo apt` commands without explicit user instruction.
 
 ---
 
-## 4. Verification Ladder & Definition of Done (DoD)
+## 3. Verification Ladder & Definition of Done (DoD)
 
 Before declaring any task or stage complete, verify every rung of this ladder:
 
 1. **Rung 0: Static Analysis**: Run syntax check and linters (`ruff check .`).
 2. **Rung 1: Security & Secrets**: Verify `.env` is uncommitted and no raw keys are printed.
 3. **Rung 2: Unit Test Suite**: Execute `.venv/bin/pytest tests/` (must pass 100%).
-4. **Rung 3: Simulation Rollout**: Execute `python scripts/run_rollout.py --steps 50` to guarantee zero physics divergence or segmentation faults.
-5. **Rung 4: Documentation Synchronization**: Ensure `README.md`, `ARCHITECTURE.md`, and `MEMORY.md` reflect the exact current state.
+4. **Rung 3: Environment & Remote Sync**: Execute `python scripts/sync_worker.py --status` to guarantee remote worker connectivity and GPU health.
+5. **Rung 4: Documentation Synchronization**: Ensure `README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, and `MEMORY.md` reflect the exact current state.

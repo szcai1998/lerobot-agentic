@@ -1,0 +1,16 @@
+policy:
+  name: act
+  role: baseline_sanity
+  checkpoint: lerobot/act_aloha_sim_transfer_cube_human
+  device: cuda:0
+  dtype: float32
+  chunk_size: 100
+  action_space: joint_position
+  capabilities:
+    supports_chunking: true
+    supports_queue_reset: true
+    supports_candidate_sampling: false
+    supports_language_goal: false
+    exposes_policy_features: false
+    supports_async_inference: false
+    supports_canonical_to_native_recovery_actions: false
