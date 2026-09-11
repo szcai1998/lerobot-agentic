@@ -54,3 +54,8 @@
   - `scripts/download_assets.py` lint-clean; still downloads nothing by default (asset-wiring is the next mini phase).
   - Remote pre-pivot folder `/home/umcai/medical_ai_projects/lerobot-agentic` (11 GB, old ACT checkpoints + eval videos) deleted; `sync_worker.py` repointed to `/home/umcai/lerobot-reliability`.
   - `ruff check .` clean; `pytest tests/` green.
+- **2026-09-10**: Phase 1 — canonical data models & interface contracts (branch `feat/phase-1-contracts`):
+  - Pre-flight: `vla-eval` 0.5.0 installed & imports; ships `benchmarks/{libero,libero_plus,libero_pro,robocasa,robocasa365,robomme,vlabench,...}`, `runners/{sync,live}_runner.py`, `model_servers/`, `cli/_docker.py` — matches the frozen architecture's E0 assumption.
+  - Pre-flight: all 9 `download_assets.py` HF repo IDs resolve. **License follow-ups**: `lerobot/pi05_libero_base` is under the **Gemma** license (not Apache); `lerobot/libero_plus` has **no declared license** on its card — confirm before Phase 5.
+  - `src/lerobot_reliability/data_types.py` + `protocols/` package + `tests/test_contracts.py`; 48 tests green, `ruff` clean.
+  - Decision: canonical arrays are `numpy.ndarray` (not framework tensors) — neutral across runtime/telemetry/analysis, matches `vla-eval` wire + Parquet.

@@ -117,7 +117,8 @@ lerobot-reliability/
 │   ├── FRONTIER_RESEARCH_SUPPORT.md                 # Frozen v1.0 research landscape
 │   └── ...
 ├── src/lerobot_reliability/                     # Core framework package
-│   ├── __init__.py                             # (Phase 0) package stub
+│   ├── data_types.py                           # (Phase 1) canonical frozen value types
+│   ├── protocols/                              # (Phase 1) runtime-checkable interface contracts
 │   ├── backends/                               # (Phase 5) VlaEvalBackend & DirectRuntimeBackend
 │   ├── adapters/                               # (Phase 5) PolicyAdapter and reliability bridges
 │   ├── detectors/                              # (Phase 4) FailureDetector implementations
