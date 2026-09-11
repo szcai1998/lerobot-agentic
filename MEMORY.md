@@ -30,7 +30,7 @@
 ## 2. Remote Workstation Protocol
 
 - **SSH Alias**: `workstation` (`~/.ssh/config` → `umcai@100.75.252.120`, key `~/.ssh/id_ed25519`). Host: `umcai-workstation`.
-- **Remote Repo Directory**: `/home/umcai/lerobot-reliability` (does not exist yet; `sync_worker.py --push` creates it). The pre-pivot `/home/umcai/medical_ai_projects/lerobot-agentic` tree was deleted 2026-09-10.
+- **Remote Repo Directory**: `/home/umcai/lerobot-agentic` (mirrored to match local folder name).
 - **Git Security Invariant**: Git credentials remain strictly on the local PC. Code pushes bake the current local commit SHA into `.git_commit` before transfer so remote runs retain full audit provenance.
 - **Sync Commands**:
   - `python scripts/sync_worker.py --status`: Checks GPU telemetry and active Python jobs.
@@ -59,4 +59,5 @@
   - Pre-flight: all 9 `download_assets.py` HF repo IDs resolve. **License follow-ups**: `lerobot/pi05_libero_base` is under the **Gemma** license (not Apache); `lerobot/libero_plus` has **no declared license** on its card — confirm before Phase 5.
   - `src/lerobot_reliability/data_types.py` + `protocols/` package + `tests/test_contracts.py`; 48 tests green, `ruff` clean.
   - Decision: canonical arrays are `numpy.ndarray` (not framework tensors) — neutral across runtime/telemetry/analysis, matches `vla-eval` wire + Parquet.
-- **2026-09-11**: Phase 1 merged to `main` via PR #1 (`b717a22`). 48/48 tests green. Asset downloads deferred; ready for Phase 2.
+- **2026-09-11**: Phase 1 merged to `main` via PR #1 (`b717a22`). 48/48 tests green.
+- **2026-09-11**: Phase 0.5 completed: `download_assets.py` inventory expanded to all 13 canonical assets (models + datasets) with license metadata and batch download options; `libero_10` downloaded and cached locally; datasets batch downloading on remote RTX 4090 worker; remote workspace path configured as `/home/umcai/lerobot-agentic` matching local folder name.
