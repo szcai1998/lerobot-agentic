@@ -16,7 +16,7 @@ from pathlib import Path
 
 LOCAL_REPO = Path(__file__).resolve().parent.parent
 DEFAULT_REMOTE_HOST = "workstation"
-DEFAULT_REMOTE_DIR = "/home/umcai/lerobot-reliability"
+DEFAULT_REMOTE_DIR = "/home/umcai/lerobot-agentic"
 
 
 def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:

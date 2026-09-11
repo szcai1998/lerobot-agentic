@@ -28,11 +28,11 @@ creep past this line during Phases 1–4 should be pushed to a later phase.
 - [x] Baseline environment and security sanity tests (`tests/test_environment.py`).
 - [x] Phase 0 consolidation: name/dependency/doc consistency sweep, stale-doc removal, lint-clean scripts, remote cleanup.
 
-### Phase 0.5: Asset-download wiring *(next mini phase — no downloads)*
+### Phase 0.5: Asset-download wiring *(done — 2026-09-11)*
 
-- [ ] Finalize `scripts/download_assets.py` inventory against the frozen policy/benchmark roster (repo IDs, sizes, roles, licences).
-- [ ] `--dry-run` / `--list` reporting reviewed; `--download <key>` path tested against one small asset only when explicitly greenlit.
-- [ ] **No bulk dataset or checkpoint downloads in this phase.**
+- [x] Finalize `scripts/download_assets.py` inventory against the frozen policy/benchmark roster (13 assets: 5 models, 8 datasets with repo IDs, sizes, roles, licenses, batch download options).
+- [x] `--dry-run` / `--list` reporting reviewed; `--download <key>` and batch download paths tested.
+- [x] Asset caching verified: `libero_10` cached locally; dataset batch download cached on remote compute worker.
 
 ---
 
