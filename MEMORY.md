@@ -8,7 +8,7 @@
 
 - **Project**: LeRobot Reliability Lab (`lerobot-reliability`)
 - **Package Path**: `src/lerobot_reliability/`
-- **Current Phase**: Phase 0 (Operational Foundation & Scaffolding)
+- **Current Phase**: Phase 2 (Fail-Closed Checkpoint & Configuration Integrity)
 - **Primary Technical Report**: `docs/LEROBOT_RELIABILITY_LAB_TECHNICAL_REPORT.md` (Frozen v1.0)
 - **Research Landscape Snapshot**: `docs/FRONTIER_RESEARCH_SUPPORT.md` (Frozen v1.0)
 
@@ -59,3 +59,4 @@
   - Pre-flight: all 9 `download_assets.py` HF repo IDs resolve. **License follow-ups**: `lerobot/pi05_libero_base` is under the **Gemma** license (not Apache); `lerobot/libero_plus` has **no declared license** on its card — confirm before Phase 5.
   - `src/lerobot_reliability/data_types.py` + `protocols/` package + `tests/test_contracts.py`; 48 tests green, `ruff` clean.
   - Decision: canonical arrays are `numpy.ndarray` (not framework tensors) — neutral across runtime/telemetry/analysis, matches `vla-eval` wire + Parquet.
+- **2026-09-11**: Phase 1 merged to `main` via PR #1 (`b717a22`). 48/48 tests green. Asset downloads deferred; ready for Phase 2.
